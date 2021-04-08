@@ -1,3 +1,4 @@
+import os
 import argparse
 import multiprocessing
 import numpy as np
@@ -16,18 +17,20 @@ from checkpoint import (
     init_tensorboard,
     write_tensorboard,
 )
-from model import Encoder, Decoder
+#from model import Encoder, Decoder
+from transformer_model import TransformerEncoderFor2DFeatures, AttentionDecoder
 from dataset import CrohmeDataset, START, PAD, collate_batch
+from scheduler import CircularLRBeta
 
 input_size = (128, 128)
 low_res_shape = (684, input_size[0] // 16, input_size[1] // 16)
 high_res_shape = (792, input_size[0] // 8, input_size[1] // 8)
 
-batch_size = 4
+batch_size = 24
 num_workers = multiprocessing.cpu_count()
-num_epochs = 100
+num_epochs = 10
 print_epochs = 1
-learning_rate = 1e-3
+learning_rate = 5e-4 
 lr_epochs = 20
 lr_factor = 0.1
 weight_decay = 1e-4
@@ -36,10 +39,12 @@ dropout_rate = 0.2
 teacher_forcing_ratio = 0.5
 seed = 1234
 
-gt_train = "./data/gt_split/train.tsv"
-gt_validation = "./data/gt_split/validation.tsv"
-tokensfile = "./data/tokens.tsv"
-root = "./data/train/"
+DATA_PATH = "../data/IM2LATEX"
+
+gt_train = os.path.join(DATA_PATH, "gt_split/train.tsv")
+gt_validation = os.path.join(DATA_PATH, "gt_split/validation.tsv")
+tokensfile = os.path.join(DATA_PATH, "tokens.txt")
+root = DATA_PATH #os.path.join(DATA_PATH, "train/")
 use_cuda = torch.cuda.is_available()
 
 transformers = transforms.Compose(
@@ -58,6 +63,7 @@ def run_epoch(
     epoch_text,
     criterion,
     optimiser,
+    lr_scheduler,
     teacher_forcing_ratio,
     max_grad_norm,
     device,
@@ -90,33 +96,46 @@ def run_epoch(
             expected = d["truth"]["encoded"].to(device)
             batch_max_len = expected.size(1)
             # Replace -1 with the PAD token
+            mask = ( expected != -1 )
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
-            enc_low_res, enc_high_res = enc(input)
-            # Decoder needs to be reset, because the coverage attention (alpha)
-            # only applies to the current image.
-            dec.reset(curr_batch_size)
-            hidden = dec.init_hidden(curr_batch_size).to(device)
-            # Starts with a START token
-            sequence = torch.full(
-                (curr_batch_size, 1),
-                data_loader.dataset.token_to_id[START],
-                dtype=torch.long,
-                device=device,
-            )
-            # The teacher forcing is done per batch, not symbol
-            use_teacher_forcing = train and random.random() < teacher_forcing_ratio
-            decoded_values = []
-            for i in range(batch_max_len - 1):
-                previous = expected[:, i] if use_teacher_forcing else sequence[:, -1]
-                previous = previous.view(-1, 1)
-                out, hidden = dec(previous, hidden, enc_low_res, enc_high_res)
-                hidden = hidden.detach()
-                _, top1_id = torch.topk(out, 1)
-                sequence = torch.cat((sequence, top1_id), dim=1)
-                decoded_values.append(out)
+            
+            enc_res = enc(input)
+            #enc_low_res, enc_high_res = enc(input)
+            decoded_values = dec(enc_res, expected, train, batch_max_len)
+            decoded_values = decoded_values.transpose(1,2)
+            _, sequence = torch.topk(decoded_values, 1, dim=1)
+            sequence = sequence.squeeze(1)
 
-            decoded_values = torch.stack(decoded_values, dim=2).to(device)
+            # ### PREVIOUS
+            # # Decoder needs to be reset, because the coverage attention (alpha)
+            # # only applies to the current image.
+            # dec.reset(curr_batch_size)
+            # hidden = dec.init_hidden(curr_batch_size).to(device)
+            # # Starts with a START token
+            # sequence = torch.full(
+            #     (curr_batch_size, 1),
+            #     data_loader.dataset.token_to_id[START],
+            #     dtype=torch.long,
+            #     device=device,
+            # )
+            # # The teacher forcing is done per batch, not symbol
+            # use_teacher_forcing = train and random.random() < teacher_forcing_ratio
+            # decoded_values = []
+            # for i in range(batch_max_len - 1):
+            #     previous = expected[:, i] if train else sequence[:, -1]
+            #     previous = previous.view(-1, 1)
+
+            #     out, hidden = dec(previous, hidden, enc_res)
+            #     #out, hidden = dec(previous, hidden, enc_low_res, enc_high_res)
+
+            #     hidden = hidden.detach()
+            #     _, top1_id = torch.topk(out, 1)
+            #     sequence = torch.cat((sequence, top1_id), dim=1)
+            #     decoded_values.append(out)
+
+            # decoded_values = torch.stack(decoded_values, dim=2).to(device)
             # decoded_values does not contain the start symbol
+
             loss = criterion(decoded_values, expected[:, 1:])
 
             if train:
@@ -132,11 +151,19 @@ def run_epoch(
                     optim_params, max_norm=max_grad_norm
                 )
                 grad_norms.append(grad_norm)
+
+                lr_scheduler.step()
                 optimiser.step()
 
             losses.append(loss.item())
-            correct_symbols += torch.sum(sequence == expected, dim=(0, 1)).item()
-            total_symbols += expected.numel()
+
+            expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
+            correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
+            total_symbols += torch.sum(expected[:, 1:] != data_loader.dataset.token_to_id[PAD], dim=(0,1)).item()
+            
+            # print("expected", expected.size())
+            # print( "step acc ", torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item(),  torch.sum(expected[:, 1:] != data_loader.dataset.token_to_id[PAD], dim=(0,1)).item())
+
             pbar.update(curr_batch_size)
 
     result = {
@@ -145,7 +172,7 @@ def run_epoch(
         "total_symbols": total_symbols,
     }
     if train:
-        result["grad_norm"] = np.mean(grad_norms)
+        result["grad_norm"] = np.mean([ tensor.cpu() for tensor in  grad_norms])
 
     return result
 
@@ -181,8 +208,8 @@ def train(
     for epoch in range(num_epochs):
         start_time = time.time()
 
-        if lr_scheduler:
-            lr_scheduler.step()
+        # if lr_scheduler:
+        #     lr_scheduler.step()
 
         epoch_text = "[{current:>{pad}}/{end}] Epoch {epoch}".format(
             current=epoch + 1,
@@ -198,6 +225,7 @@ def train(
             epoch_text,
             criterion,
             optimiser,
+            lr_scheduler,
             teacher_forcing_ratio,
             max_grad_norm,
             device,
@@ -209,8 +237,10 @@ def train(
             train_result["correct_symbols"] / train_result["total_symbols"]
         )
         train_accuracy.append(train_epoch_accuracy)
-        epoch_lr = lr_scheduler.get_lr()[0]
-        learning_rates.append(epoch_lr)
+        # epoch_lr = lr_scheduler.get_lr() [0]
+        epoch_lr = lr_scheduler.get_lr()
+        
+        #learning_rates.append(epoch_lr)
 
         validation_result = run_epoch(
             validation_data_loader,
@@ -219,6 +249,7 @@ def train(
             epoch_text,
             criterion,
             optimiser,
+            lr_scheduler,
             teacher_forcing_ratio,
             max_grad_norm,
             device,
@@ -460,17 +491,34 @@ def main():
         num_workers=options.num_workers,
         collate_fn=collate_batch,
     )
-    criterion = nn.CrossEntropyLoss().to(device)
-    enc = Encoder(
-        img_channels=3, dropout_rate=options.dropout_rate, checkpoint=encoder_checkpoint
-    ).to(device)
-    dec = Decoder(
+    criterion = nn.CrossEntropyLoss( ignore_index= train_data_loader.dataset.token_to_id[PAD] ).to(device)
+    
+    # Transformer Encoder
+    enc = TransformerEncoderFor2DFeatures(
+        input_size=3, hidden_dim=256, filter_size=512, head_num=8, layer_num=12, dropout_rate=0.1,
+        checkpoint=encoder_checkpoint
+        ).to(device)
+    # Origin
+    # enc = Encoder(
+    #     img_channels=3, dropout_rate=options.dropout_rate, checkpoint=encoder_checkpoint
+    # ).to(device)
+
+    dec = AttentionDecoder(
         len(train_dataset.id_to_token),
-        low_res_shape,
-        high_res_shape,
+        src_dim=256,
+        embedding_dim=256,
+        hidden_dim=256,
+        num_lstm_layers=1,
         checkpoint=decoder_checkpoint,
-        device=device,
     ).to(device)
+
+    # dec = Decoder(
+    #     len(train_dataset.id_to_token),
+    #     low_res_shape,
+    #     high_res_shape,
+    #     checkpoint=decoder_checkpoint,
+    #     device=device,
+    # ).to(device)
     enc.train()
     dec.train()
 
@@ -481,9 +529,15 @@ def main():
         param for param in dec.parameters() if param.requires_grad
     ]
     params_to_optimise = [*enc_params_to_optimise, *dec_params_to_optimise]
-    optimiser = optim.Adadelta(
-        params_to_optimise, lr=options.lr, weight_decay=options.weight_decay
-    )
+    
+    # optimiser = optim.Adadelta(
+    #     params_to_optimise, lr=options.lr, weight_decay=options.weight_decay
+    # )
+
+    optimiser = optim.Adam(params_to_optimise, lr=options.lr)
+    cycle = len(train_data_loader)*num_epochs
+    lr_scheduler = CircularLRBeta(optimiser, options.lr, 10, 10, cycle, [0.95, 0.85])
+
     optimiser_state = checkpoint.get("optimiser")
     if optimiser_state:
         optimiser.load_state_dict(optimiser_state)
@@ -495,9 +549,9 @@ def main():
         param_group["initial_lr"] = options.lr
     # Decay learning rate by a factor of lr_factor (default: 0.1)
     # every lr_epochs (default: 3)
-    lr_scheduler = optim.lr_scheduler.StepLR(
-        optimiser, step_size=options.lr_epochs, gamma=options.lr_factor
-    )
+    # lr_scheduler = optim.lr_scheduler.StepLR(
+    #     optimiser, step_size=options.lr_epochs, gamma=options.lr_factor
+    # )
 
     train(
         enc,
