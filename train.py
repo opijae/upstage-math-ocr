@@ -18,23 +18,27 @@ from checkpoint import (
     write_tensorboard,
 )
 #from model import Encoder, Decoder
-from transformer_model import TransformerEncoderFor2DFeatures, AttentionDecoder
+from transformer_model import TransformerEncoderFor2DFeatures, AttentionDecoder, TransformerDecoder
 from dataset import CrohmeDataset, START, PAD, collate_batch
 from scheduler import CircularLRBeta
 
-input_size = (128, 128)
+#input_size = (256, 256)
+input_size = (128, 384)
+
+dec_layers = 3
+
 low_res_shape = (684, input_size[0] // 16, input_size[1] // 16)
 high_res_shape = (792, input_size[0] // 8, input_size[1] // 8)
 
 batch_size = 24
-num_workers = multiprocessing.cpu_count()
-num_epochs = 10
+num_workers = 4
+num_epochs = 30
 print_epochs = 1
-learning_rate = 5e-4 
+learning_rate = 5e-4 #1e-4 
 lr_epochs = 20
 lr_factor = 0.1
 weight_decay = 1e-4
-max_grad_norm = 5.0
+max_grad_norm = 2.0
 dropout_rate = 0.2
 teacher_forcing_ratio = 0.5
 seed = 1234
@@ -54,7 +58,6 @@ transformers = transforms.Compose(
         transforms.ToTensor(),
     ]
 )
-
 
 def run_epoch(
     data_loader,
@@ -101,7 +104,8 @@ def run_epoch(
             
             enc_res = enc(input)
             #enc_low_res, enc_high_res = enc(input)
-            decoded_values = dec(enc_res, expected, train, batch_max_len)
+            
+            decoded_values = dec(enc_res, expected[:, :-1], train, batch_max_len)
             decoded_values = decoded_values.transpose(1,2)
             _, sequence = torch.topk(decoded_values, 1, dim=1)
             sequence = sequence.squeeze(1)
@@ -152,6 +156,7 @@ def run_epoch(
                 )
                 grad_norms.append(grad_norm)
 
+                # cycle
                 lr_scheduler.step()
                 optimiser.step()
 
@@ -164,7 +169,15 @@ def run_epoch(
             # print("expected", expected.size())
             # print( "step acc ", torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item(),  torch.sum(expected[:, 1:] != data_loader.dataset.token_to_id[PAD], dim=(0,1)).item())
 
+            # if train == False:
+            #     print("-------- Example")
+            #     print(sequence[0])
+            #     print(expected[0,1:])
+
             pbar.update(curr_batch_size)
+
+    print("-"*10 + "GT: ", expected[:3, :])
+    print("-"*10 + "PR: ", sequence[:3, :])
 
     result = {
         "loss": np.mean(losses),
@@ -192,6 +205,7 @@ def train(
     checkpoint=default_checkpoint,
     prefix="",
     max_grad_norm=max_grad_norm,
+    log_file=open("log.txt", 'w')
 ):
     if print_epochs is None:
         print_epochs = num_epochs
@@ -208,6 +222,7 @@ def train(
     for epoch in range(num_epochs):
         start_time = time.time()
 
+        # N cycle
         # if lr_scheduler:
         #     lr_scheduler.step()
 
@@ -237,8 +252,8 @@ def train(
             train_result["correct_symbols"] / train_result["total_symbols"]
         )
         train_accuracy.append(train_epoch_accuracy)
-        # epoch_lr = lr_scheduler.get_lr() [0]
-        epoch_lr = lr_scheduler.get_lr()
+        #epoch_lr = lr_scheduler.get_lr() [0] # N cycle
+        epoch_lr = lr_scheduler.get_lr() # cycle
         
         #learning_rates.append(epoch_lr)
 
@@ -279,8 +294,7 @@ def train(
         elapsed_time = time.time() - start_time
         elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
         if epoch % print_epochs == 0 or epoch == num_epochs - 1:
-            print(
-                (
+            output_string = (
                     "{epoch_text}: "
                     "Train Accuracy = {train_accuracy:.5f}, "
                     "Train Loss = {train_loss:.5f}, "
@@ -297,7 +311,9 @@ def train(
                     lr=epoch_lr,
                     time=elapsed_time,
                 )
-            )
+
+            print(output_string)
+            log_file.write(output_string+"\n")
             write_tensorboard(
                 writer,
                 start_epoch + epoch + 1,
@@ -435,6 +451,12 @@ def parse_args():
         action="store_true",
         help="Crop images to their bounding boxes",
     )
+    parser.add_argument(
+        "--log",
+        dest="log",
+        default="log.txt", 
+        help="Path to write logs",
+    )
 
     return parser.parse_args()
 
@@ -487,15 +509,15 @@ def main():
     validation_data_loader = DataLoader(
         validation_dataset,
         batch_size=options.batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=options.num_workers,
         collate_fn=collate_batch,
     )
-    criterion = nn.CrossEntropyLoss( ignore_index= train_data_loader.dataset.token_to_id[PAD] ).to(device)
+    criterion = nn.CrossEntropyLoss( ignore_index= train_data_loader.dataset.token_to_id[PAD], reduction='sum' ).to(device)
     
     # Transformer Encoder
     enc = TransformerEncoderFor2DFeatures(
-        input_size=3, hidden_dim=256, filter_size=512, head_num=8, layer_num=12, dropout_rate=0.1,
+        input_size=1, hidden_dim=128, filter_size=512, head_num=8, layer_num=12, dropout_rate=dropout_rate,
         checkpoint=encoder_checkpoint
         ).to(device)
     # Origin
@@ -503,14 +525,29 @@ def main():
     #     img_channels=3, dropout_rate=options.dropout_rate, checkpoint=encoder_checkpoint
     # ).to(device)
 
-    dec = AttentionDecoder(
+    dec = TransformerDecoder(
         len(train_dataset.id_to_token),
-        src_dim=256,
-        embedding_dim=256,
-        hidden_dim=256,
-        num_lstm_layers=1,
+        src_dim=128,
+        hidden_dim=128,
+        filter_dim=512,
+        head_num=8,
+        dropout_rate=dropout_rate,
+        pad_id = train_data_loader.dataset.token_to_id[PAD],
+        st_id = train_data_loader.dataset.token_to_id[START],
+        layer_num=dec_layers,
         checkpoint=decoder_checkpoint,
-    ).to(device)
+        ).to(device)
+
+    # dec = AttentionDecoder(
+    #     len(train_dataset.id_to_token),
+    #     src_dim=128,
+    #     embedding_dim=128,
+    #     hidden_dim=128,
+    #     pad_id = train_data_loader.dataset.token_to_id[PAD],
+    #     st_id = train_data_loader.dataset.token_to_id[START],
+    #     num_lstm_layers=1,
+    #     checkpoint=decoder_checkpoint,
+    # ).to(device)
 
     # dec = Decoder(
     #     len(train_dataset.id_to_token),
@@ -535,6 +572,8 @@ def main():
     # )
 
     optimiser = optim.Adam(params_to_optimise, lr=options.lr)
+    
+    # Cycle
     cycle = len(train_data_loader)*num_epochs
     lr_scheduler = CircularLRBeta(optimiser, options.lr, 10, 10, cycle, [0.95, 0.85])
 
@@ -549,6 +588,8 @@ def main():
         param_group["initial_lr"] = options.lr
     # Decay learning rate by a factor of lr_factor (default: 0.1)
     # every lr_epochs (default: 3)
+
+    # N cycle
     # lr_scheduler = optim.lr_scheduler.StepLR(
     #     optimiser, step_size=options.lr_epochs, gamma=options.lr_factor
     # )
@@ -568,6 +609,7 @@ def main():
         checkpoint=checkpoint,
         prefix=options.prefix,
         max_grad_norm=options.max_grad_norm,
+        log_file=open(options.log, 'w')
     )
 
 

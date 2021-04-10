@@ -20,6 +20,7 @@ embedding_dim = 256
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+from dataset import START, PAD
 
 class ShallowCNN(nn.Module):
     """
@@ -31,15 +32,15 @@ class ShallowCNN(nn.Module):
     """
     def __init__(self, input_channel, output_channel=256, dropout_rate=0.2):
         super(ShallowCNN, self).__init__()
-        self.output_channel = [int(output_channel//8), int(output_channel//4), int(output_channel//2)]  # [32, 64, 128]
-        self.ConvNet = nn.Sequential(
-                nn.Conv2d(input_channel, self.output_channel[0], 3, 2, 1),
-                nn.BatchNorm2d(self.output_channel[0]), nn.ReLU(True), # 32x (64x128)
-                nn.Conv2d(self.output_channel[0], self.output_channel[1], 3, 2, 1),
-                nn.BatchNorm2d(self.output_channel[1]), nn.ReLU(True), # 64 x (32x64)
-                nn.Conv2d(self.output_channel[1], self.output_channel[2], 3, 2, 1),
-                nn.BatchNorm2d(self.output_channel[2]), nn.ReLU(True) # 128 x (16x32)
-            )
+        # self.output_channel = [int(output_channel//8), int(output_channel//4), int(output_channel//2)]  # [32, 64, 128]
+        # self.ConvNet = nn.Sequential(
+        #         nn.Conv2d(input_channel, self.output_channel[0], 3, 2, 1),
+        #         nn.BatchNorm2d(self.output_channel[0]), nn.ReLU(True), # 32x (64x128)
+        #         nn.Conv2d(self.output_channel[0], self.output_channel[1], 3, 2, 1),
+        #         nn.BatchNorm2d(self.output_channel[1]), nn.ReLU(True), # 64 x (32x64)
+        #         nn.Conv2d(self.output_channel[1], self.output_channel[2], 3, 2, 1),
+        #         nn.BatchNorm2d(self.output_channel[2]), nn.ReLU(True) # 128 x (16x32)
+        #     )
 
         # self.output_channel = [int(output_channel//4), int(output_channel//2)]  # [32, 64, 128]
         # self.ConvNet = nn.Sequential(
@@ -48,6 +49,17 @@ class ShallowCNN(nn.Module):
         #         nn.Conv2d(self.output_channel[0], self.output_channel[1], 3, 2, 1),
         #         nn.BatchNorm2d(self.output_channel[1]), nn.ReLU(True) # 64 x (32x64)
         #     )
+
+        # Like Origin
+        self.output_channel = [48, int(output_channel//4), int(output_channel//2)]  # [32, 64, 128]
+        self.ConvNet = nn.Sequential(
+                nn.Conv2d(input_channel, self.output_channel[0], 7, 2, 3),
+                nn.BatchNorm2d(self.output_channel[0]), nn.ReLU(True), # 32x (64x128)
+                nn.Conv2d(self.output_channel[0], self.output_channel[1], 7, 2, 3),
+                nn.BatchNorm2d(self.output_channel[1]), nn.ReLU(True), # 64 x (32x64)
+                nn.Conv2d(self.output_channel[1], self.output_channel[2], 7, 2, 3),
+                nn.BatchNorm2d(self.output_channel[2]), nn.ReLU(True) # 64 x (32x64)
+            )
 
 
     def forward(self, input):
@@ -58,7 +70,7 @@ class ShallowCNN(nn.Module):
         out = out.view(b, c, h//2, 2, w).transpose(2, 3).contiguous()
         out = out.view(b, 2*c, h//2, w).contiguous()
 
-        return out # 256 x (8x32)
+        return out # 256 x (16x64)
 
 class ScaledDotProductAttention(nn.Module):
     def __init__(self, temperature, dropout=0.1):
@@ -134,16 +146,16 @@ class TransformerEncoderLayer(nn.Module):
 
     def forward(self, input):
 
-        out = self.attention_norm(input)
-        out = self.attention_layer(out, out, out)
-        out = self.feedforward_norm(out)
-        out = self.feedforward_layer(out)
+        att = self.attention_layer(input, input, input)
+        out = self.attention_norm(att + input)
 
+        ff = self.feedforward_layer(out)
+        out = self.feedforward_norm(ff + out)
         return out
 
 class PositionalEncoding2D(nn.Module):
 
-    def __init__(self, in_channels, max_h=16, max_w=64, dropout=0.1):
+    def __init__(self, in_channels, max_h=64, max_w=128, dropout=0.1):
         super(PositionalEncoding2D, self).__init__()
 
         self.h_position_encoder = self.generate_encoder(in_channels//2, max_h)
@@ -216,6 +228,146 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             out = layer(out)
         return out
 
+class TransformerDecoderLayer(nn.Module):
+    def __init__(self, input_size, filter_size, head_num, dropout_rate=0.2):
+        super(TransformerDecoderLayer, self).__init__()
+
+        self.self_attention_layer = MultiHeadAttention(in_channels=input_size, head_num=head_num, dropout=dropout_rate)
+        self.self_attention_norm = nn.LayerNorm(normalized_shape=input_size)
+
+        self.attention_layer = MultiHeadAttention(in_channels=input_size, head_num=head_num, dropout=dropout_rate)
+        self.attention_norm = nn.LayerNorm(normalized_shape=input_size)
+
+        self.feedforward_layer = Feedforward(filter_size=filter_size, hidden_dim=input_size)
+        self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
+
+    def forward(self, tgt, tgt_prev, src, tgt_mask):
+
+        if tgt_prev == None: # Train
+            att = self.self_attention_layer(tgt, tgt, tgt, tgt_mask)
+            out = self.self_attention_norm(att + tgt )
+
+            att = self.attention_layer(tgt, src, src)
+            out = self.attention_norm(att + out )
+
+            ff = self.feedforward_layer(out)
+            out = self.feedforward_norm(ff + out )
+        else: 
+            tgt_prev = torch.cat([tgt_prev, tgt], 1)
+            att = self.self_attention_layer(tgt, tgt_prev, tgt_prev, tgt_mask)
+            out = self.self_attention_norm(att + tgt )
+
+            att = self.attention_layer(tgt, src, src)
+            out = self.attention_norm(att + out )
+
+            ff = self.feedforward_layer(out)
+            out = self.feedforward_norm(ff + out )
+        return out
+
+class PositionEncoder1D(nn.Module):
+    def __init__(self, in_channels, max_len=500, dropout=0.1):
+        super(PositionEncoder1D, self).__init__()
+
+        self.position_encoder = self.generate_encoder(in_channels, max_len)
+        self.position_encoder = self.position_encoder.unsqueeze(0)
+        self.dropout = nn.Dropout(p=dropout)
+
+    def generate_encoder(self, in_channels, max_len):
+        pos = torch.arange(max_len).float().unsqueeze(1)
+
+        i = torch.arange(in_channels).float().unsqueeze(0)
+        angle_rates = 1 / torch.pow(10000, (2 * (i // 2)) / in_channels)
+
+        position_encoder = pos * angle_rates
+        position_encoder[:, 0::2] = torch.sin(position_encoder[:, 0::2])
+        position_encoder[:, 1::2] = torch.cos(position_encoder[:, 1::2])
+
+        return position_encoder
+
+    def forward(self, x, point=-1):
+        if point == -1:
+            out = x + self.position_encoder[:, :x.size(1), :].to(x.get_device())
+            out = self.dropout(out)
+        else:
+            out = x + self.position_encoder[:, point, :].unsqueeze(1).to(x.get_device())
+        return out
+
+class TransformerDecoder(nn.Module):
+    def __init__(self, num_classes, src_dim, hidden_dim, filter_dim, head_num, dropout_rate, pad_id, st_id, layer_num=1, checkpoint=None):
+        super(TransformerDecoder, self).__init__()
+
+        self.embedding = nn.Embedding(num_classes+1, hidden_dim)
+        self.hidden_dim = hidden_dim
+        self.filter_dim = filter_dim
+        self.num_classes = num_classes
+        self.layer_num = layer_num
+
+        self.pos_encoder = PositionEncoder1D(in_channels=hidden_dim, dropout=dropout_rate)
+
+        self.attention_layers = nn.ModuleList(
+            [ TransformerDecoderLayer(hidden_dim, filter_dim, head_num, dropout_rate) for _ in range(layer_num)]
+            )
+        self.generator = nn.Linear(hidden_dim, num_classes)
+
+        self.pad_id = pad_id
+        self.st_id = st_id
+
+        if checkpoint is not None:
+            self.load_state_dict(checkpoint)
+
+    def pad_mask(self, text):
+        pad_mask = (text == self.pad_id)
+        pad_mask[:, 0] = False
+        pad_mask = pad_mask.unsqueeze(1)
+
+        return pad_mask
+
+    def order_mask(self, length):
+        order_mask = torch.triu(torch.ones(length,length), diagonal=1).bool()
+        order_mask = order_mask.unsqueeze(0).to(device)
+        return order_mask
+
+    def text_embedding(self, texts):
+        tgt = self.embedding(texts)
+        tgt *= math.sqrt(tgt.size(2))
+
+        return tgt
+
+    def forward(self, src, text, is_train=True, batch_max_length=50):
+
+        if is_train:
+            tgt = self.text_embedding(text)
+            tgt = self.pos_encoder(tgt)
+            tgt_mask = (self.pad_mask(text) | self.order_mask(text.size(1)))
+            for layer in self.attention_layers:
+                tgt = layer(tgt, None, src, tgt_mask)
+            out = self.generator(tgt)
+        else:
+            out = []
+            num_steps = batch_max_length - 1
+            target = torch.LongTensor(src.size(0)).fill_(self.st_id).to(device)
+            
+            features = [None]*self.layer_num
+
+            for t in range(num_steps):
+                target = target.unsqueeze(1)
+                tgt = self.text_embedding(target)
+                tgt = self.pos_encoder(tgt, point=t)
+                tgt_mask = self.order_mask(t+1)
+                tgt_mask = tgt_mask[:, -1].unsqueeze(1) # [1, (l+1)]
+                for l, layer in enumerate(self.attention_layers):
+                    tgt = layer(tgt, features[l], src, tgt_mask)
+                    features[l] = tgt if features[l] == None else torch.cat([features[l],tgt],1)
+
+                _out = self.generator(tgt) # [b, 1, c]
+                target = torch.argmax(_out[:, -1:, :], dim=-1)
+                target = target.squeeze()
+
+                out.append(_out)
+            out = torch.stack(out, dim=1).to(device)
+            out = out.squeeze(2)
+
+        return out
 
 class AttentionCell(nn.Module):
 
@@ -261,7 +413,7 @@ class AttentionCell(nn.Module):
 
 class AttentionDecoder(nn.Module):
 
-    def __init__(self, num_classes, src_dim, embedding_dim, hidden_dim, num_lstm_layers=1, checkpoint=None):
+    def __init__(self, num_classes, src_dim, embedding_dim, hidden_dim, pad_id, st_id, num_lstm_layers=1, checkpoint=None):
         super(AttentionDecoder, self).__init__()
 
         self.embedding = nn.Embedding(num_classes+1, embedding_dim)
@@ -269,10 +421,13 @@ class AttentionDecoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_classes = num_classes
         self.num_lstm_layers = num_lstm_layers
-        self.generator = nn.Linear(hidden_dim, num_classes)
+        self.generator = nn.Linear(hidden_dim, num_classes) 
+        self.pad_id = pad_id
+        self.st_id = st_id
 
         if checkpoint is not None:
             self.load_state_dict(checkpoint)
+
 
     def forward(self, src, text, is_train=True, batch_max_length=50):
         """
@@ -305,7 +460,7 @@ class AttentionDecoder(nn.Module):
             probs = self.generator(output_hiddens)
 
         else:
-            targets = torch.LongTensor(batch_size).fill_(0).to(device)  # [GO] token
+            targets = torch.LongTensor(batch_size).fill_(self.st_id).to(device)  # [GO] token
             probs = torch.FloatTensor(batch_size, num_steps, self.num_classes).fill_(0).to(device)
 
             for i in range(num_steps):
@@ -321,96 +476,3 @@ class AttentionDecoder(nn.Module):
 
         return probs  # batch_size x num_steps x num_classes
 
-class Decoder(nn.Module):
-    """Decoder
-
-    GRU based Decoder which attends to the low- and high-resolution annotations to
-    create a LaTeX string.
-    """
-
-    def __init__(
-        self,
-        num_classes,
-        res_shape,
-        hidden_size=256,
-        embedding_dim=256,
-        checkpoint=None,
-        device=device,
-    ):
-        """
-        Args:
-            num_classes (int): Number of symbol classes
-            low_res_shape ((int, int, int)): Shape of the low resolution annotations
-                i.e. (C, W, H)
-            high_res_shape ((int, int, int)): Shape of the high resolution annotations
-                i.e. (C_prime, 2W, 2H)
-            hidden_size (int, optional): Hidden size of the GRU [Default: 256]
-            embedding_dim (int, optional): Dimension of the embedding [Default: 256]
-            checkpoint (dict, optional): State dictionary to be loaded
-            device (torch.device, optional): Device for the tensors
-        """
-        super(Decoder, self).__init__()
-        
-        context_size = res_shape[0]
-        self.embedding = nn.Embedding(num_classes, embedding_dim)
-        self.gru1 = nn.GRU(
-            input_size=embedding_dim, hidden_size=hidden_size, batch_first=True
-        )
-        self.gru2 = nn.GRU(
-            input_size=context_size, hidden_size=hidden_size, batch_first=True
-        )
-        # L = H * W
-        res_attn_size = res_shape[1]*res_shape[2]
-
-        self.coverage_attn_low = CoverageAttention(
-            context_size,
-            hidden_size,
-            attn_size=res_attn_size,
-            kernel_size=(11, 11),
-            padding=5,
-            device=device,
-        )
-        
-        self.W_o = nn.Parameter(torch.empty((num_classes, embedding_dim // 2)))
-        self.W_s = nn.Parameter(torch.empty((embedding_dim, hidden_size)))
-        self.W_c = nn.Parameter(torch.empty((embedding_dim, context_size)))
-        self.U_pred = nn.Parameter(torch.empty((n_prime, n)))
-        self.maxout = Maxout(2)
-        self.hidden_size = hidden_size
-        nn.init.xavier_normal_(self.W_o)
-        nn.init.xavier_normal_(self.W_s)
-        nn.init.xavier_normal_(self.W_c)
-        nn.init.xavier_normal_(self.U_pred)
-
-        if checkpoint is not None:
-            self.load_state_dict(checkpoint)
-
-    def init_hidden(self, batch_size):
-        return torch.zeros((1, batch_size, self.hidden_size))
-
-    def reset(self, batch_size):
-        self.coverage_attn_low.reset_alpha(batch_size)
-        self.coverage_attn_high.reset_alpha(batch_size)
-
-    # Unsqueeze and squeeze are used to add and remove the seq_len dimension,
-    # which is always 1 since only the previous symbol is provided, not a sequence.
-    # The inputs that are multiplied by the weights are transposed to get
-    # (m x batch_size) instead of (batch_size x m). The result of the
-    # multiplication is tranposed back.
-    def forward(self, x, hidden, low_res, high_res):
-        embedded = self.embedding(x)
-        pred, _ = self.gru1(embedded, hidden)
-        # u_pred is computed here instead of in the coverage attention, because the
-        # weight U_pred is shared and the coverage attention does not use pred for
-        # anything else. This avoids computing it twice.
-        u_pred = torch.matmul(self.U_pred, pred.squeeze(1).t()).t()
-        context_low = self.coverage_attn_low(low_res, u_pred)
-        context_high = self.coverage_attn_high(high_res, u_pred)
-        context = torch.cat((context_low, context_high), dim=1)
-        new_hidden, _ = self.gru2(context.unsqueeze(1), pred.transpose(0, 1))
-        w_s = torch.matmul(self.W_s, new_hidden.squeeze(1).t()).t()
-        w_c = torch.matmul(self.W_c, context.t()).t()
-        out = embedded.squeeze(1) + w_s + w_c
-        out = self.maxout(out)
-        out = torch.matmul(self.W_o, out.t()).t()
-        return out, new_hidden.transpose(0, 1)
