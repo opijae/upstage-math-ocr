@@ -23,9 +23,14 @@ from dataset import CrohmeDataset, START, PAD, collate_batch
 from scheduler import CircularLRBeta
 
 #input_size = (256, 256)
-input_size = (128, 384)
+input_size = (128, 128)
 
 dec_layers = 3
+rgb = 1
+src_dim = 300
+encoder_dim = 300
+filter_size = 600
+encoder_layers = 6
 
 low_res_shape = (684, input_size[0] // 16, input_size[1] // 16)
 high_res_shape = (792, input_size[0] // 8, input_size[1] // 8)
@@ -39,15 +44,23 @@ lr_epochs = 20
 lr_factor = 0.1
 weight_decay = 1e-4
 max_grad_norm = 2.0
-dropout_rate = 0.2
+dropout_rate = 0.1
 teacher_forcing_ratio = 0.5
 seed = 1234
 
-DATA_PATH = "../data/IM2LATEX"
+# IM2LATEX
+# DATA_PATH = "../data/IM2LATEX"
+# gt_train = os.path.join(DATA_PATH, "gt_split/train.tsv")
+# gt_validation = os.path.join(DATA_PATH, "gt_split/validation.tsv")
+# tokensfile = os.path.join(DATA_PATH, "tokens.txt")
 
-gt_train = os.path.join(DATA_PATH, "gt_split/train.tsv")
-gt_validation = os.path.join(DATA_PATH, "gt_split/validation.tsv")
-tokensfile = os.path.join(DATA_PATH, "tokens.txt")
+# AIDA
+DATA_PATH = "../data/AIDA/aida"
+gt_train = os.path.join(DATA_PATH, "aida_train.txt")
+gt_validation = os.path.join(DATA_PATH, "aida_test.txt")
+tokensfile = os.path.join(DATA_PATH, "aida_dict.txt")
+
+
 root = DATA_PATH #os.path.join(DATA_PATH, "train/")
 use_cuda = torch.cuda.is_available()
 
@@ -105,7 +118,7 @@ def run_epoch(
             enc_res = enc(input)
             #enc_low_res, enc_high_res = enc(input)
             
-            decoded_values = dec(enc_res, expected[:, :-1], train, batch_max_len)
+            decoded_values = dec(enc_res, expected[:, :-1], train, batch_max_len, teacher_forcing_ratio)
             decoded_values = decoded_values.transpose(1,2)
             _, sequence = torch.topk(decoded_values, 1, dim=1)
             sequence = sequence.squeeze(1)
@@ -513,11 +526,11 @@ def main():
         num_workers=options.num_workers,
         collate_fn=collate_batch,
     )
-    criterion = nn.CrossEntropyLoss( ignore_index= train_data_loader.dataset.token_to_id[PAD], reduction='sum' ).to(device)
+    criterion = nn.CrossEntropyLoss( ignore_index= train_data_loader.dataset.token_to_id[PAD] ).to(device)
     
-    # Transformer Encoder
+    # Transformer Encoder (RGB)
     enc = TransformerEncoderFor2DFeatures(
-        input_size=1, hidden_dim=128, filter_size=512, head_num=8, layer_num=12, dropout_rate=dropout_rate,
+        input_size=rgb, hidden_dim=encoder_dim, filter_size=filter_size, head_num=8, layer_num=encoder_layers, dropout_rate=dropout_rate,
         checkpoint=encoder_checkpoint
         ).to(device)
     # Origin
@@ -527,7 +540,7 @@ def main():
 
     dec = TransformerDecoder(
         len(train_dataset.id_to_token),
-        src_dim=128,
+        src_dim=src_dim,
         hidden_dim=128,
         filter_dim=512,
         head_num=8,

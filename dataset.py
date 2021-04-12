@@ -88,6 +88,7 @@ def collate_batch(data):
         "truth": {
             "text": [d["truth"]["text"] for d in data],
             "encoded": torch.tensor(padded_encoded),
+            #"len_mask": 
         },
     }
 
@@ -100,7 +101,7 @@ class CrohmeDataset(Dataset):
         groundtruth,
         tokens_file,
         root=None,
-        ext=".png",
+        ext=".jpg",
         crop=False,
         transform=None,
     ):
@@ -124,7 +125,8 @@ class CrohmeDataset(Dataset):
             reader = csv.reader(fd, delimiter="\t")
             self.data = [
                 {
-                    "path": os.path.join(root, p + ext),
+                    #"path": os.path.join(root, p + ext),
+                    "path": os.path.join(root, p+ext),
                     "truth": {
                         "text": truth,
                         "encoded": [
@@ -144,7 +146,8 @@ class CrohmeDataset(Dataset):
         item = self.data[i]
         image = Image.open(item["path"])
         # Remove alpha channel
-        image = image.convert("RGB")
+        #image = image.convert("RGB")
+        image = image.convert("L")
 
         if self.crop:
             # Image needs to be inverted because the bounding box cuts off black pixels,
