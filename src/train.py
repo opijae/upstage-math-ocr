@@ -242,6 +242,8 @@ def main(config_file):
         )
     
     # Log
+    if not os.path.exists(dirName):
+        os.makedirs(options.prefix)
     log_file = open(os.path.join(options.prefix, 'log.txt'), 'w')
     if options.print_epochs is None:
         options.print_epochs = options.num_epochs
