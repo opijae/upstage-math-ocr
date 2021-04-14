@@ -82,7 +82,7 @@ def load_vocab(tokens_paths):
 
 
 def split_gt(groundtruth, validation_percent=0.2, proportion=1.0):
-    root = os.path.dirname(groundtruth)
+    root = os.path.join(os.path.dirname(groundtruth), 'images')
     with open(groundtruth, "r") as fd:
         reader = csv.reader(fd, delimiter="\t")
         data = list(reader)
@@ -139,7 +139,7 @@ class LoadDataset(Dataset):
         self.token_to_id, self.id_to_token = load_vocab(tokens_file)
         self.data = [
             {
-                "path": os.path.join('images', p),
+                "path": p,
                 "truth": {
                     "text": truth,
                     "encoded": [

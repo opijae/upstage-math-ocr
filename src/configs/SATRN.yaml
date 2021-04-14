@@ -12,10 +12,10 @@ encoder_layers: 6
 checkpoint: ""
 prefix: "./sample_run"
 
-data: # now supports only one
+data:
   gt_paths:
     - "/root/data/Upstage/print/gt.txt"
-    - "/root/data/Aida/gt.txt"
+    - "/root/data/CROHME/gt.txt"
   token_paths:
     - "/root/data/Upstage/print/tokens.txt" 
     - "/root/data/Aida/tokens.txt"
