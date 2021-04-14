@@ -199,7 +199,7 @@ def main(config_file):
             transforms.ToTensor(),
         ]
     )
-    train_data_loader, valid_data_loader, train_dataset = dataset_loader(
+    train_data_loader, validation_data_loader, train_dataset = dataset_loader(
         options.data.gt_paths,
         options.data.token_paths,
         options.data.dataset_proportions,
@@ -222,8 +222,6 @@ def main(config_file):
     
     # Get optimizer
     optimizer = get_optimizer(options.optimizer.optimizer, params_to_optimise, lr=options.optimizer.lr, weight_decay=options.optimizer.weight_decay)
-    cycle = len(train_data_loader) * options.num_epochs
-    lr_scheduler = CircularLRBeta(optimizer, options.optimizer.lr, 10, 10, cycle, [0.95, 0.85])
     optimizer_state = checkpoint.get("optimizer")
     if optimizer_state:
         optimizer.load_state_dict(optimizer_state)
@@ -235,10 +233,13 @@ def main(config_file):
         param_group["initial_lr"] = options.optimizer.lr
     # Decay learning rate by a factor of lr_factor (default: 0.1)
     # every lr_epochs (default: 3)
-    # N cycle
-    # lr_scheduler = optim.lr_scheduler.StepLR(
-    #     optimizer, step_size=options.optimizer.lr_epochs, gamma=options.optimizer.lr_factor
-    # )
+    if options.optimizer.is_cycle:
+        cycle = len(train_data_loader) * options.num_epochs
+        lr_scheduler = CircularLRBeta(optimizer, options.optimizer.lr, 10, 10, cycle, [0.95, 0.85])
+    else:
+        lr_scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=options.optimizer.lr_epochs, gamma=options.optimizer.lr_factor
+        )
     
     # Log
     log_file = open(os.path.join(options.prefix, 'log.txt'), 'w')
