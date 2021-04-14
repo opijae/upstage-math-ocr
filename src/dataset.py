@@ -1,5 +1,6 @@
 import csv
 import os
+import random
 import torch
 from PIL import Image, ImageOps
 from torch.utils.data import Dataset
@@ -67,14 +68,28 @@ def encode_truth(truth, token_to_id):
     return truth_tokens
 
 
-def load_vocab(tokens_file):
-    with open(tokens_file, "r") as fd:
-        reader = fd.read()
-        tokens = reader.split('\n')
-        tokens.extend(SPECIAL_TOKENS)
-        token_to_id = {tok: i for i, tok in enumerate(tokens)}
-        id_to_token = {i: tok for i, tok in enumerate(tokens)}
-        return token_to_id, id_to_token
+def load_vocab(tokens_paths):
+    tokens = []
+    for tokens_file in tokens_paths:
+        with open(tokens_file, "r") as fd:
+            reader = fd.read()
+            tokens += reader.split('\n')
+    tokens.extend(SPECIAL_TOKENS)
+    tokens = list(set(tokens))
+    token_to_id = {tok: i for i, tok in enumerate(tokens)}
+    id_to_token = {i: tok for i, tok in enumerate(tokens)}
+    return token_to_id, id_to_token
+
+
+def split_gt(groundtruth, validation_percent=0.2):
+    root = os.path.dirname(groundtruth)
+    with open(groundtruth, "r") as fd:
+        reader = csv.reader(fd, delimiter="\t")
+        data = list(reader)
+        random.shuffle(data)
+        validation_len = round(len(data) * validation_percent)
+    data = [[os.path.join(root, x[0]), x[1]] for x in data]
+    return data[validation_len:], data[:validation_len]
 
 
 def collate_batch(data):
@@ -102,7 +117,6 @@ class LoadDataset(Dataset):
         self,
         groundtruth,
         tokens_file,
-        ext=".jpg",
         crop=False,
         transform=None,
     ):
@@ -116,26 +130,23 @@ class LoadDataset(Dataset):
                 on a sample.
         """
         super(LoadDataset, self).__init__()
-        root = os.path.dirname(groundtruth)
         self.crop = crop
         self.transform = transform
         self.token_to_id, self.id_to_token = load_vocab(tokens_file)
-        with open(groundtruth, "r") as fd:
-            reader = csv.reader(fd, delimiter="\t")
-            self.data = [
-                {
-                    "path": os.path.join(root, p + ext),
-                    "truth": {
-                        "text": truth,
-                        "encoded": [
-                            self.token_to_id[START],
-                            *encode_truth(truth, self.token_to_id),
-                            self.token_to_id[END],
-                        ],
-                    },
-                }
-                for p, truth in reader
-            ]
+        self.data = [
+            {
+                "path": os.path.join('images', p),
+                "truth": {
+                    "text": truth,
+                    "encoded": [
+                        self.token_to_id[START],
+                        *encode_truth(truth, self.token_to_id),
+                        self.token_to_id[END],
+                    ],
+                },
+            }
+            for p, truth in groundtruth
+        ]
 
     def __len__(self):
         return len(self.data)
@@ -171,11 +182,15 @@ def dataset_loader(
     num_workers=4,
 ):
 
-    # TODO: Read all data
-    # TODO: Split to train and valid
-
+    # Read data
+    train_data, valid_data = [], []
+    for path in gt_paths:
+        train, valid = split_gt(path, valid_proportion)
+        train_data += train
+        valid_data += valid
+    
     # Load data
-    train_dataset = LoadDataset(gt_paths[0], token_paths, ext='', crop=crop, transform=transform)
+    train_dataset = LoadDataset(train_data, token_paths, crop=crop, transform=transform)
     train_data_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -184,7 +199,7 @@ def dataset_loader(
         collate_fn=collate_batch,
     )
 
-    valid_dataset = LoadDataset(gt_paths[1], token_paths, crop=crop, transform=transform)
+    valid_dataset = LoadDataset(valid_data, token_paths, crop=crop, transform=transform)
     valid_data_loader = DataLoader(
         valid_dataset,
         batch_size=batch_size,

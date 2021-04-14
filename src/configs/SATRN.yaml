@@ -11,13 +11,15 @@ encoder_dim: 300
 filter_size: 600
 encoder_layers: 6
 checkpoint: ""
-prefix: ""
+prefix: "sample_run"
 
 data: # now supports only one
   gt_paths:
-    - "../data/Aida/images/train.tsv"  # for now, train
-    - "../data/Aida/images/validation.tsv"  # for now, valid
-  token_paths: "../data/Aida/tokens.txt"  # TODO: to list
+    - "/root/data/Upstage/print/gt.txt"
+    - "/root/data/Aida/gt.txt"
+  token_paths:
+    - "/root/data/Upstage/print/tokens.txt" 
+    - "/root/data/Aida/tokens.txt"
   dataset_proportions:
     - 1.0
   split_proportions:
