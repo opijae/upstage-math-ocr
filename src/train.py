@@ -129,7 +129,7 @@ def run_epoch(
 
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
             correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
-            total_symbols += torch.sum(expected[:, 1:] != data_loader.dataset.token_to_id[PAD], dim=(0,1)).item()
+            total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0,1)).item()
             
             # print("expected", expected.size())
             # print( "step acc ", torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item(),  torch.sum(expected[:, 1:] != data_loader.dataset.token_to_id[PAD], dim=(0,1)).item())
