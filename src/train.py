@@ -209,6 +209,7 @@ def main(config_file):
         transform=transformed,
         batch_size=options.batch_size,
         num_workers=options.num_workers,
+        rgb=options.data.rgb
     )
 
     # Get loss, model
@@ -242,7 +243,7 @@ def main(config_file):
         )
     
     # Log
-    if not os.path.exists(dirName):
+    if not os.path.exists(options.prefix):
         os.makedirs(options.prefix)
     log_file = open(os.path.join(options.prefix, 'log.txt'), 'w')
     if options.print_epochs is None:

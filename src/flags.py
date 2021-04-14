@@ -12,6 +12,9 @@ def dict_to_namedtuple(d):
     FLAGSTuple = collections.namedtuple('FLAGS', sorted(d.keys()))
 
     for k, v in d.items():
+        
+        if k == 'prefix':
+            v = os.path.join('./', v)
 
         if type(v) is dict:
             d[k] = dict_to_namedtuple(v)

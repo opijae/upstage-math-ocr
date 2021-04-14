@@ -81,12 +81,14 @@ def load_vocab(tokens_paths):
     return token_to_id, id_to_token
 
 
-def split_gt(groundtruth, validation_percent=0.2):
+def split_gt(groundtruth, validation_percent=0.2, proportion=1.0):
     root = os.path.dirname(groundtruth)
     with open(groundtruth, "r") as fd:
         reader = csv.reader(fd, delimiter="\t")
         data = list(reader)
         random.shuffle(data)
+        dataset_len = round(len(data) * proportion)
+        data = data[:dataset_len]
         validation_len = round(len(data) * validation_percent)
     data = [[os.path.join(root, x[0]), x[1]] for x in data]
     return data[validation_len:], data[:validation_len]
@@ -119,6 +121,7 @@ class LoadDataset(Dataset):
         tokens_file,
         crop=False,
         transform=None,
+        rgb=3,
     ):
         """
         Args:
@@ -132,6 +135,7 @@ class LoadDataset(Dataset):
         super(LoadDataset, self).__init__()
         self.crop = crop
         self.transform = transform
+        self.rgb = rgb
         self.token_to_id, self.id_to_token = load_vocab(tokens_file)
         self.data = [
             {
@@ -154,9 +158,12 @@ class LoadDataset(Dataset):
     def __getitem__(self, i):
         item = self.data[i]
         image = Image.open(item["path"])
-        # Remove alpha channel
-        # image = image.convert("RGB")
-        image = image.convert("L")
+        if self.rgb == 3:
+            image = image.convert("RGB")
+        elif self.rgb == 1: 
+            image = image.convert("L")
+        else:
+            raise NotImplementedError
 
         if self.crop:
             # Image needs to be inverted because the bounding box cuts off black pixels,
@@ -180,17 +187,21 @@ def dataset_loader(
     transform=None,
     batch_size=16,
     num_workers=4,
+    rgb=3,
 ):
 
     # Read data
     train_data, valid_data = [], []
-    for path in gt_paths:
-        train, valid = split_gt(path, valid_proportion)
+    for i, path in enumerate(gt_paths):
+        prop = 1.
+        if len(dataset_proportions) > i:
+            prop = dataset_proportions[i]
+        train, valid = split_gt(path, valid_proportion, prop)
         train_data += train
         valid_data += valid
     
     # Load data
-    train_dataset = LoadDataset(train_data, token_paths, crop=crop, transform=transform)
+    train_dataset = LoadDataset(train_data, token_paths, crop=crop, transform=transform, rgb=rgb)
     train_data_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -199,7 +210,7 @@ def dataset_loader(
         collate_fn=collate_batch,
     )
 
-    valid_dataset = LoadDataset(valid_data, token_paths, crop=crop, transform=transform)
+    valid_dataset = LoadDataset(valid_data, token_paths, crop=crop, transform=transform, rgb=rgb)
     valid_data_loader = DataLoader(
         valid_dataset,
         batch_size=batch_size,

@@ -9,7 +9,7 @@ def get_network(enc_type, dec_type, options, encoder_checkpoint, decoder_checkpo
 
     if enc_type == 'Transformer':
         enc = TransformerEncoderFor2DFeatures(
-            input_size=options.rgb, hidden_dim=options.encoder_dim, filter_size=options.filter_size, head_num=8, layer_num=options.encoder_layers, dropout_rate=options.dropout_rate,
+            input_size=options.data.rgb, hidden_dim=options.encoder_dim, filter_size=options.filter_size, head_num=8, layer_num=options.encoder_layers, dropout_rate=options.dropout_rate,
             checkpoint=encoder_checkpoint
             ).to(device)
     elif enc_type == 'CRNN':
