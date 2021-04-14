@@ -13,6 +13,7 @@ pip install tensorboardX
 
 현재 검증된 GPU 개발환경으로는
 - `Pytorch 1.0. (CUDA 10.1)`
+- `Pytorch 1.4.0 (CUDA 10.0)`
 - `Pytorch 1.7.1 (CUDA 11.0)`
 
 
