@@ -2,6 +2,7 @@ checkpoints/
 data/
 tensorboard/
 log.txt
+log/
 
 # Node
 node_modules/
