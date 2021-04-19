@@ -4,6 +4,7 @@ import multiprocessing
 import numpy as np
 import random
 import time
+import shutil
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -16,6 +17,7 @@ from checkpoint import (
     init_tensorboard,
     write_tensorboard,
 )
+from psutil import virtual_memory
 
 from flags import Flags
 from utils import get_network, get_optimizer
@@ -63,15 +65,17 @@ def run_epoch(
             expected = d["truth"]["encoded"].to(device)
             batch_max_len = expected.size(1)
             # Replace -1 with the PAD token
-            mask = ( expected != -1 )
+            mask = expected != -1
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
-            
+
             # TODO: enc -> dec pipeline should be put into model function
             enc_res = enc(input)
-            #enc_low_res, enc_high_res = enc(input)
-            
-            decoded_values = dec(enc_res, expected[:, :-1], train, batch_max_len, teacher_forcing_ratio)
-            decoded_values = decoded_values.transpose(1,2)
+            # enc_low_res, enc_high_res = enc(input)
+
+            decoded_values = dec(
+                enc_res, expected[:, :-1], train, batch_max_len, teacher_forcing_ratio
+            )
+            decoded_values = decoded_values.transpose(1, 2)
             _, sequence = torch.topk(decoded_values, 1, dim=1)
             sequence = sequence.squeeze(1)
 
@@ -129,8 +133,8 @@ def run_epoch(
 
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
             correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
-            total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0,1)).item()
-            
+            total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
+
             # print("expected", expected.size())
             # print( "step acc ", torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item(),  torch.sum(expected[:, 1:] != data_loader.dataset.token_to_id[PAD], dim=(0,1)).item())
 
@@ -141,8 +145,8 @@ def run_epoch(
 
             pbar.update(curr_batch_size)
 
-    print("-"*10 + "GT: ", expected[:3, :])
-    print("-"*10 + "PR: ", sequence[:3, :])
+    print("-" * 10 + "GT: ", expected[:3, :])
+    print("-" * 10 + "PR: ", sequence[:3, :])
 
     result = {
         "loss": np.mean(losses),
@@ -150,7 +154,7 @@ def run_epoch(
         "total_symbols": total_symbols,
     }
     if train:
-        result["grad_norm"] = np.mean([ tensor.cpu() for tensor in  grad_norms])
+        result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
 
     return result
 
@@ -164,6 +168,19 @@ def main(config_file):
     is_cuda = torch.cuda.is_available()
     hardware = "cuda" if is_cuda else "cpu"
     device = torch.device(hardware)
+    print("--------------------------------")
+    print("Running {} epochs on device {}\n".format(options.num_epochs, device))
+
+    # Print system environments
+    num_gpus = torch.cuda.device_count()
+    num_cpus = os.cpu_count()
+    mem_size = virtual_memory().available // (1024 ** 3)
+    print(
+        "[+] System environments\n",
+        "The number of gpus : {}\n".format(num_gpus),
+        "The number of cpus : {}\n".format(num_cpus),
+        "Memory Size : {}G\n".format(mem_size),
+    )
 
     # Load checkpoint and print result
     checkpoint = (
@@ -171,24 +188,22 @@ def main(config_file):
         if options.checkpoint != ""
         else default_checkpoint
     )
-    print("Running {} epochs on {}".format(options.num_epochs, hardware))
     encoder_checkpoint = checkpoint["model"].get("encoder")
     decoder_checkpoint = checkpoint["model"].get("decoder")
     if encoder_checkpoint is not None:
         print(
-            (
-                "Resuming from - Epoch {}: "
-                "Train Accuracy = {train_accuracy:.5f}, "
-                "Train Loss = {train_loss:.5f}, "
-                "Validation Accuracy = {validation_accuracy:.5f}, "
-                "Validation Loss = {validation_loss:.5f}, "
-            ).format(
-                checkpoint["epoch"],
-                train_accuracy=checkpoint["train_accuracy"][-1],
-                train_loss=checkpoint["train_losses"][-1],
-                validation_accuracy=checkpoint["validation_accuracy"][-1],
-                validation_loss=checkpoint["validation_losses"][-1],
-            )
+            "[+] Checkpoint\n",
+            "Resuming from epoch : {}\n".format(checkpoint["epoch"]),
+            "Train Accuracy : {train_accuracy:.5f}\n".format(
+                checkpoint["train_accuracy"][-1]
+            ),
+            "Train Loss : {train_loss:.5f}\n".format(checkpoint["train_losses"][-1]),
+            "Validation Accuracy : {validation_accuracy:.5f}\n".format(
+                ["validation_accuracy"][-1]
+            ),
+            "Validation Loss : {validation_loss:.5f}\n".format(
+                ["validation_losses"][-1]
+            ),
         )
 
     # Get data
@@ -199,7 +214,12 @@ def main(config_file):
             transforms.ToTensor(),
         ]
     )
-    train_data_loader, validation_data_loader, train_dataset = dataset_loader(
+    (
+        train_data_loader,
+        validation_data_loader,
+        train_dataset,
+        valid_dataset,
+    ) = dataset_loader(
         options.data.gt_paths,
         options.data.token_paths,
         options.data.dataset_proportions,
@@ -209,20 +229,56 @@ def main(config_file):
         transform=transformed,
         batch_size=options.batch_size,
         num_workers=options.num_workers,
-        rgb=options.data.rgb
+        rgb=options.data.rgb,
+    )
+    print(
+        "[+] Data\n",
+        "The number of train samples : {}\n".format(len(train_dataset)),
+        "The number of validation samples : {}\n".format(len(valid_dataset)),
+        "The number of classes : {}\n".format(len(train_dataset.token_to_id)),
     )
 
     # Get loss, model
-    criterion = nn.CrossEntropyLoss( ignore_index= train_data_loader.dataset.token_to_id[PAD] ).to(device)
-    enc, dec = get_network(options.network.enc, options.network.dec, options, encoder_checkpoint, decoder_checkpoint, device, train_dataset)
+    criterion = nn.CrossEntropyLoss(
+        ignore_index=train_data_loader.dataset.token_to_id[PAD]
+    ).to(device)
+    enc, dec = get_network(
+        options.network.enc,
+        options.network.dec,
+        options,
+        encoder_checkpoint,
+        decoder_checkpoint,
+        device,
+        train_dataset,
+    )
     enc.train()
     dec.train()
-    enc_params_to_optimise = [param for param in enc.parameters() if param.requires_grad]
-    dec_params_to_optimise = [param for param in dec.parameters() if param.requires_grad]
+    enc_params_to_optimise = [
+        param for param in enc.parameters() if param.requires_grad
+    ]
+    dec_params_to_optimise = [
+        param for param in dec.parameters() if param.requires_grad
+    ]
     params_to_optimise = [*enc_params_to_optimise, *dec_params_to_optimise]
-    
+    print(
+        "[+] Network\n",
+        "Encoder (# param) : {} ({})\n".format(
+            options.network.enc,
+            sum(p.numel() for p in enc_params_to_optimise),
+        ),
+        "Decoder (# param) : {} ({})\n".format(
+            options.network.dec,
+            sum(p.numel() for p in dec_params_to_optimise),
+        ),
+    )
+
     # Get optimizer
-    optimizer = get_optimizer(options.optimizer.optimizer, params_to_optimise, lr=options.optimizer.lr, weight_decay=options.optimizer.weight_decay)
+    optimizer = get_optimizer(
+        options.optimizer.optimizer,
+        params_to_optimise,
+        lr=options.optimizer.lr,
+        weight_decay=options.optimizer.weight_decay,
+    )
     optimizer_state = checkpoint.get("optimizer")
     if optimizer_state:
         optimizer.load_state_dict(optimizer_state)
@@ -236,16 +292,21 @@ def main(config_file):
     # every lr_epochs (default: 3)
     if options.optimizer.is_cycle:
         cycle = len(train_data_loader) * options.num_epochs
-        lr_scheduler = CircularLRBeta(optimizer, options.optimizer.lr, 10, 10, cycle, [0.95, 0.85])
+        lr_scheduler = CircularLRBeta(
+            optimizer, options.optimizer.lr, 10, 10, cycle, [0.95, 0.85]
+        )
     else:
         lr_scheduler = optim.lr_scheduler.StepLR(
-            optimizer, step_size=options.optimizer.lr_epochs, gamma=options.optimizer.lr_factor
+            optimizer,
+            step_size=options.optimizer.lr_epochs,
+            gamma=options.optimizer.lr_factor,
         )
-    
+
     # Log
     if not os.path.exists(options.prefix):
         os.makedirs(options.prefix)
-    log_file = open(os.path.join(options.prefix, 'log.txt'), 'w')
+    log_file = open(os.path.join(options.prefix, "log.txt"), "w")
+    shutil.copy(config_file, os.path.join(options.prefix, "train_config.yaml"))
     if options.print_epochs is None:
         options.print_epochs = options.num_epochs
     writer = init_tensorboard(name=options.prefix.strip("-"))
@@ -288,11 +349,13 @@ def main(config_file):
         )
         train_losses.append(train_result["loss"])
         grad_norms.append(train_result["grad_norm"])
-        train_epoch_accuracy = (train_result["correct_symbols"] / train_result["total_symbols"])
+        train_epoch_accuracy = (
+            train_result["correct_symbols"] / train_result["total_symbols"]
+        )
         train_accuracy.append(train_epoch_accuracy)
-        #epoch_lr = lr_scheduler.get_lr() [0] # N cycle
-        epoch_lr = lr_scheduler.get_lr() # cycle
-        #learning_rates.append(epoch_lr)
+        # epoch_lr = lr_scheduler.get_lr() [0] # N cycle
+        epoch_lr = lr_scheduler.get_lr()  # cycle
+        # learning_rates.append(epoch_lr)
 
         # Validation
         validation_result = run_epoch(
@@ -309,10 +372,12 @@ def main(config_file):
             train=False,
         )
         validation_losses.append(validation_result["loss"])
-        validation_epoch_accuracy = (validation_result["correct_symbols"] / validation_result["total_symbols"])
+        validation_epoch_accuracy = (
+            validation_result["correct_symbols"] / validation_result["total_symbols"]
+        )
         validation_accuracy.append(validation_epoch_accuracy)
 
-        # Save checkpoint 
+        # Save checkpoint
         save_checkpoint(
             {
                 "epoch": start_epoch + epoch + 1,
@@ -333,24 +398,24 @@ def main(config_file):
         elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
         if epoch % print_epochs == 0 or epoch == options.num_epochs - 1:
             output_string = (
-                    "{epoch_text}: "
-                    "Train Accuracy = {train_accuracy:.5f}, "
-                    "Train Loss = {train_loss:.5f}, "
-                    "Validation Accuracy = {validation_accuracy:.5f}, "
-                    "Validation Loss = {validation_loss:.5f}, "
-                    "lr = {lr} "
-                    "(time elapsed {time})"
-                ).format(
-                    epoch_text=epoch_text,
-                    train_accuracy=train_epoch_accuracy,
-                    train_loss=train_result["loss"],
-                    validation_accuracy=validation_epoch_accuracy,
-                    validation_loss=validation_result["loss"],
-                    lr=epoch_lr,
-                    time=elapsed_time,
-                )
+                "{epoch_text}: "
+                "Train Accuracy = {train_accuracy:.5f}, "
+                "Train Loss = {train_loss:.5f}, "
+                "Validation Accuracy = {validation_accuracy:.5f}, "
+                "Validation Loss = {validation_loss:.5f}, "
+                "lr = {lr} "
+                "(time elapsed {time})"
+            ).format(
+                epoch_text=epoch_text,
+                train_accuracy=train_epoch_accuracy,
+                train_loss=train_result["loss"],
+                validation_accuracy=validation_epoch_accuracy,
+                validation_loss=validation_result["loss"],
+                lr=epoch_lr,
+                time=elapsed_time,
+            )
             print(output_string)
-            log_file.write(output_string+"\n")
+            log_file.write(output_string + "\n")
             write_tensorboard(
                 writer,
                 start_epoch + epoch + 1,
@@ -370,7 +435,7 @@ if __name__ == "__main__":
         "-c",
         "--config_file",
         dest="config_file",
-        default='configs/SATRN.yaml',
+        default="configs/SATRN.yaml",
         type=str,
         help="Path of configuration file",
     )

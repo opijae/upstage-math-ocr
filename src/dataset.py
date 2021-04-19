@@ -219,4 +219,4 @@ def dataset_loader(
         collate_fn=collate_batch,
     )
     
-    return train_data_loader, valid_data_loader, train_dataset
+    return train_data_loader, valid_data_loader, train_dataset, valid_dataset

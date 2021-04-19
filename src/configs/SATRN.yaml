@@ -10,17 +10,17 @@ encoder_dim: 300
 filter_size: 600
 encoder_layers: 6
 checkpoint: ""
-prefix: "./sample_run"
+prefix: "./satrn_upstage"
 
 data:
   gt_paths:
     - "/root/data/Upstage/print/gt.txt"
-    - "/root/data/CROHME/gt.txt"
+    # - "/root/data/Aida/gt.txt"
+    # - "/root/data/CROHME/gt.txt"
   token_paths:
     - "/root/data/Upstage/print/tokens.txt" 
-    - "/root/data/Aida/tokens.txt"
+    # - "/root/data/Aida/tokens.txt"
   dataset_proportions:
-    - 1.0
     - 1.0
   split_proportions:
     train: 0.8
@@ -28,7 +28,7 @@ data:
   crop: True
   rgb: 1    # 3 for color, 1 for greyscale
   
-batch_size: 24
+batch_size: 64
 num_workers: 4
 num_epochs: 30
 print_epochs: 1

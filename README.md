@@ -8,9 +8,7 @@
 All dependencies can be installed with PIP.
 
 ```sh
-pip install tensorboardX
-pip install tqdm
-pip install pyyaml
+pip install tensorboardX tqdm pyyaml psutil
 ```
 
 현재 검증된 GPU 개발환경으로는

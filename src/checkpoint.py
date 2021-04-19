@@ -19,10 +19,10 @@ default_checkpoint = {
 def save_checkpoint(checkpoint, dir="./checkpoints", prefix=""):
     # Padded to 4 digits because of lexical sorting of numbers.
     # e.g. 0009.pth
-    filename = "{prefix}{num:0>4}.pth".format(num=checkpoint["epoch"], prefix=prefix)
-    if not os.path.exists(dir):
-        os.mkdir(dir)
-    torch.save(checkpoint, os.path.join(dir, filename))
+    filename = "{num:0>4}.pth".format(num=checkpoint["epoch"])
+    if not os.path.exists(os.path.join(prefix, dir)):
+        os.makedirs(os.path.join(prefix, dir))
+    torch.save(checkpoint, os.path.join(prefix, dir, filename))
 
 
 def load_checkpoint(path, cuda=use_cuda):
@@ -34,7 +34,7 @@ def load_checkpoint(path, cuda=use_cuda):
 
 
 def init_tensorboard(name="", base_dir="./tensorboard"):
-    return SummaryWriter(os.path.join(base_dir, name))
+    return SummaryWriter(os.path.join(name, base_dir))
 
 
 def write_tensorboard(
