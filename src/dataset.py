@@ -49,22 +49,12 @@ def remove_unknown_tokens(truth):
 
 # Rather ignorant way to encode the truth, but at least it works.
 def encode_truth(truth, token_to_id):
-    truth_tokens = []
-    remaining_truth = remove_unknown_tokens(truth).strip()
-    # TODO: we can simplify this
-    while len(remaining_truth) > 0:
-        try:
-            matching_starts = [
-                [i, len(tok)]
-                for tok, i in token_to_id.items()
-                if remaining_truth.startswith(tok)
-            ]
-            # Take the longest match
-            index, tok_len = max(matching_starts, key=lambda match: match[1])
-            truth_tokens.append(index)
-            remaining_truth = remaining_truth[tok_len:].lstrip()
-        except ValueError:
+    # TODO: tokens in test set but not in train set -> UNK?
+    truth_tokens = truth.split()
+    for token in truth_tokens:
+        if token not in token_to_id:
             raise Exception("Truth contains unknown token")
+    truth_tokens = [token_to_id[x] for x in truth_tokens]
     return truth_tokens
 
 
@@ -73,7 +63,7 @@ def load_vocab(tokens_paths):
     for tokens_file in tokens_paths:
         with open(tokens_file, "r") as fd:
             reader = fd.read()
-            tokens += reader.split('\n')
+            tokens += reader.split("\n")
     tokens.extend(SPECIAL_TOKENS)
     tokens = list(set(tokens))
     token_to_id = {tok: i for i, tok in enumerate(tokens)}
@@ -82,7 +72,7 @@ def load_vocab(tokens_paths):
 
 
 def split_gt(groundtruth, validation_percent=0.2, proportion=1.0):
-    root = os.path.join(os.path.dirname(groundtruth), 'images')
+    root = os.path.join(os.path.dirname(groundtruth), "images")
     with open(groundtruth, "r") as fd:
         reader = csv.reader(fd, delimiter="\t")
         data = list(reader)
@@ -107,7 +97,7 @@ def collate_batch(data):
         "truth": {
             "text": [d["truth"]["text"] for d in data],
             "encoded": torch.tensor(padded_encoded),
-            #"len_mask": 
+            # "len_mask":
         },
     }
 
@@ -160,7 +150,7 @@ class LoadDataset(Dataset):
         image = Image.open(item["path"])
         if self.rgb == 3:
             image = image.convert("RGB")
-        elif self.rgb == 1: 
+        elif self.rgb == 1:
             image = image.convert("L")
         else:
             raise NotImplementedError
@@ -193,15 +183,17 @@ def dataset_loader(
     # Read data
     train_data, valid_data = [], []
     for i, path in enumerate(gt_paths):
-        prop = 1.
+        prop = 1.0
         if len(dataset_proportions) > i:
             prop = dataset_proportions[i]
         train, valid = split_gt(path, valid_proportion, prop)
         train_data += train
         valid_data += valid
-    
+
     # Load data
-    train_dataset = LoadDataset(train_data, token_paths, crop=crop, transform=transform, rgb=rgb)
+    train_dataset = LoadDataset(
+        train_data, token_paths, crop=crop, transform=transform, rgb=rgb
+    )
     train_data_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -210,7 +202,9 @@ def dataset_loader(
         collate_fn=collate_batch,
     )
 
-    valid_dataset = LoadDataset(valid_data, token_paths, crop=crop, transform=transform, rgb=rgb)
+    valid_dataset = LoadDataset(
+        valid_data, token_paths, crop=crop, transform=transform, rgb=rgb
+    )
     valid_data_loader = DataLoader(
         valid_dataset,
         batch_size=batch_size,
@@ -218,5 +212,5 @@ def dataset_loader(
         num_workers=num_workers,
         collate_fn=collate_batch,
     )
-    
+
     return train_data_loader, valid_data_loader, train_dataset, valid_dataset

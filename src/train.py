@@ -25,6 +25,18 @@ from dataset import dataset_loader, START, PAD
 from scheduler import CircularLRBeta
 
 
+def token_to_string(tokens, data_loader):
+    result = []
+    for example in tokens:
+        string = ""
+        for token in example:
+            token = token.item()
+            if token != -1:
+                string += data_loader.dataset.id_to_token[token] + " "
+        result.append(string)
+    return result
+
+
 def run_epoch(
     data_loader,
     enc,
@@ -141,12 +153,16 @@ def run_epoch(
             # if train == False:
             #     print("-------- Example")
             #     print(sequence[0])
-            #     print(expected[0,1:])
+            #     print(expected[0, 1:])
 
             pbar.update(curr_batch_size)
 
-    print("-" * 10 + "GT: ", expected[:3, :])
-    print("-" * 10 + "PR: ", sequence[:3, :])
+    expected = token_to_string(expected, data_loader)
+    sequence = token_to_string(sequence, data_loader)
+    print("-" * 10 + "GT ({})".format("train" if train else "valid"))
+    print(*expected[:3], sep="\n")
+    print("-" * 10 + "PR ({})".format("train" if train else "valid"))
+    print(*sequence[:3], sep="\n")
 
     result = {
         "loss": np.mean(losses),
@@ -154,7 +170,8 @@ def run_epoch(
         "total_symbols": total_symbols,
     }
     if train:
-        result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
+        # result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
+        result["grad_norm"] = np.mean(grad_norms)
 
     return result
 
@@ -367,7 +384,7 @@ def main(config_file):
             optimizer,
             lr_scheduler,
             options.teacher_forcing_ratio,
-            max_grad_norm,
+            options.max_grad_norm,
             device,
             train=False,
         )
@@ -396,7 +413,7 @@ def main(config_file):
         # Summary
         elapsed_time = time.time() - start_time
         elapsed_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
-        if epoch % print_epochs == 0 or epoch == options.num_epochs - 1:
+        if epoch % options.print_epochs == 0 or epoch == options.num_epochs - 1:
             output_string = (
                 "{epoch_text}: "
                 "Train Accuracy = {train_accuracy:.5f}, "
