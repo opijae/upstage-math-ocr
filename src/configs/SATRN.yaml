@@ -1,32 +1,33 @@
-network:  # SATRN, CRNN
-  enc: "Transformer"  # Transformer, CNN
-  dec: "Transformer"  # Transformer, Attention, LSTM, FAN
+network: SATRN
 input_size:
   height: 128
   width: 128
-transformer:
-  hidden_dim: 128
-  filter_dim: 512
-  head_num: 8
-  dec_layers: 3
-  src_dim: 300
-  encoder_dim: 300
-  filter_size: 600
-  encoder_layers: 6
-checkpoint: ""
-prefix: "./log/satrn_upstage"
+SATRN:
+  encoder:
+    hidden_dim: 300
+    filter_dim: 600
+    layer_num: 6
+    head_num: 8
+  decoder:
+    src_dim: 300
+    hidden_dim: 128
+    filter_dim: 512
+    layer_num: 3
+    head_num: 8
+checkpoint: "./log/tryout/checkpoints/0007.pth"
+prefix: "./log/tryout"
 
 data:
   gt_paths:
-    - "/root/data/Upstage/print/gt.txt"
+    # - "/mnt/ssd/data/Upstage/print/gt.txt"
     # - "/root/data/Aida/gt.txt"
     # - "/root/data/CROHME/gt.txt"
-    # - "/root/data/test_data/gt.txt"
+    - "/mnt/ssd/data/test_data/gt.txt"
   token_paths:
-    - "/root/data/Upstage/print/tokens.txt" 
+    # - "/mnt/ssd/data/Upstage/print/tokens.txt" 
     # - "/root/data/Aida/tokens.txt"
     # - "/root/data/CROHME/tokens.txt"
-    # - "/root/data/test_data/tokens.txt"
+    - "/mnt/ssd/data/test_data/tokens.txt"
   dataset_proportions:
     - 1.0
   split_proportions:
@@ -35,7 +36,7 @@ data:
   crop: True
   rgb: 1    # 3 for color, 1 for greyscale
   
-batch_size: 48
+batch_size: 32
 num_workers: 4
 num_epochs: 30
 print_epochs: 1

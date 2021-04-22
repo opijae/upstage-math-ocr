@@ -45,8 +45,7 @@ def write_tensorboard(
     train_accuracy,
     validation_loss,
     validation_accuracy,
-    encoder,
-    decoder,
+    model,
 ):
     writer.add_scalar("train_loss", train_loss, epoch)
     writer.add_scalar("train_accuracy", train_accuracy, epoch)
@@ -54,7 +53,7 @@ def write_tensorboard(
     writer.add_scalar("validation_accuracy", validation_accuracy, epoch)
     writer.add_scalar("grad_norm", grad_norm, epoch)
 
-    for name, param in encoder.named_parameters():
+    for name, param in model.encoder.named_parameters():
         writer.add_histogram(
             "encoder/{}".format(name), param.detach().cpu().numpy(), epoch
         )
@@ -63,7 +62,7 @@ def write_tensorboard(
                 "encoder/{}/grad".format(name), param.grad.detach().cpu().numpy(), epoch
             )
 
-    for name, param in decoder.named_parameters():
+    for name, param in model.decoder.named_parameters():
         writer.add_histogram(
             "decoder/{}".format(name), param.detach().cpu().numpy(), epoch
         )

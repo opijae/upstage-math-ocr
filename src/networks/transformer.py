@@ -833,3 +833,47 @@ class AttentionDecoder(nn.Module):
                 targets = next_input
 
         return probs  # batch_size x num_steps x num_classes
+
+
+class SATRN(nn.Module):
+    def __init__(self, FLAGS, train_dataset, checkpoint=None):
+        super(SATRN, self).__init__()
+
+        self.encoder = TransformerEncoderFor2DFeatures(
+            input_size=FLAGS.data.rgb,
+            hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
+            filter_size=FLAGS.SATRN.encoder.filter_dim,
+            head_num=FLAGS.SATRN.encoder.head_num,
+            layer_num=FLAGS.SATRN.encoder.layer_num,
+            dropout_rate=FLAGS.dropout_rate,
+        )
+
+        self.decoder = TransformerDecoder(
+            num_classes=len(train_dataset.id_to_token),
+            src_dim=FLAGS.SATRN.decoder.src_dim,
+            hidden_dim=FLAGS.SATRN.decoder.hidden_dim,
+            filter_dim=FLAGS.SATRN.decoder.filter_dim,
+            head_num=FLAGS.SATRN.decoder.head_num,
+            dropout_rate=FLAGS.dropout_rate,
+            pad_id=train_dataset.token_to_id[PAD],
+            st_id=train_dataset.token_to_id[START],
+            layer_num=FLAGS.SATRN.decoder.layer_num,
+        )
+
+        self.criterion = (
+            nn.CrossEntropyLoss()
+        )  # without ignore_index=train_dataset.token_to_id[PAD]
+
+        if checkpoint:
+            self.load_state_dict(checkpoint)
+
+    def forward(self, input, expected, is_train, teacher_forcing_ratio):
+        enc_result = self.encoder(input)
+        dec_result = self.decoder(
+            enc_result,
+            expected[:, :-1],
+            is_train,
+            expected.size(1),
+            teacher_forcing_ratio,
+        )
+        return dec_result

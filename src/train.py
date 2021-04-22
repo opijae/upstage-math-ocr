@@ -39,8 +39,7 @@ def token_to_string(tokens, data_loader):
 
 def run_epoch(
     data_loader,
-    enc,
-    dec,
+    model,
     epoch_text,
     criterion,
     optimizer,
@@ -53,11 +52,9 @@ def run_epoch(
     # Disables autograd during validation mode
     torch.set_grad_enabled(train)
     if train:
-        enc.train()
-        dec.train()
+        model.train()
     else:
-        enc.eval()
-        dec.eval()
+        model.eval()
 
     losses = []
     grad_norms = []
@@ -72,54 +69,19 @@ def run_epoch(
     ) as pbar:
         for d in data_loader:
             input = d["image"].to(device)
+
             # The last batch may not be a full batch
             curr_batch_size = len(input)
             expected = d["truth"]["encoded"].to(device)
-            batch_max_len = expected.size(1)
+
             # Replace -1 with the PAD token
-            mask = expected != -1
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
 
-            # TODO: enc -> dec pipeline should be put into model function
-            enc_res = enc(input)
-            # enc_low_res, enc_high_res = enc(input)
+            output = model(input, expected, train, teacher_forcing_ratio)
 
-            decoded_values = dec(
-                enc_res, expected[:, :-1], train, batch_max_len, teacher_forcing_ratio
-            )
-            decoded_values = decoded_values.transpose(1, 2)
+            decoded_values = output.transpose(1, 2)
             _, sequence = torch.topk(decoded_values, 1, dim=1)
             sequence = sequence.squeeze(1)
-
-            # ### PREVIOUS
-            # # Decoder needs to be reset, because the coverage attention (alpha)
-            # # only applies to the current image.
-            # dec.reset(curr_batch_size)
-            # hidden = dec.init_hidden(curr_batch_size).to(device)
-            # # Starts with a START token
-            # sequence = torch.full(
-            #     (curr_batch_size, 1),
-            #     data_loader.dataset.token_to_id[START],
-            #     dtype=torch.long,
-            #     device=device,
-            # )
-            # # The teacher forcing is done per batch, not symbol
-            # use_teacher_forcing = train and random.random() < teacher_forcing_ratio
-            # decoded_values = []
-            # for i in range(batch_max_len - 1):
-            #     previous = expected[:, i] if train else sequence[:, -1]
-            #     previous = previous.view(-1, 1)
-
-            #     out, hidden = dec(previous, hidden, enc_res)
-            #     #out, hidden = dec(previous, hidden, enc_low_res, enc_high_res)
-
-            #     hidden = hidden.detach()
-            #     _, top1_id = torch.topk(out, 1)
-            #     sequence = torch.cat((sequence, top1_id), dim=1)
-            #     decoded_values.append(out)
-
-            # decoded_values = torch.stack(decoded_values, dim=2).to(device)
-            # decoded_values does not contain the start symbol
 
             loss = criterion(decoded_values, expected[:, 1:])
 
@@ -146,14 +108,6 @@ def run_epoch(
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
             correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
             total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
-
-            # print("expected", expected.size())
-            # print( "step acc ", torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item(),  torch.sum(expected[:, 1:] != data_loader.dataset.token_to_id[PAD], dim=(0,1)).item())
-
-            # if train == False:
-            #     print("-------- Example")
-            #     print(sequence[0])
-            #     print(expected[0, 1:])
 
             pbar.update(curr_batch_size)
 
@@ -186,7 +140,7 @@ def main(config_file):
     hardware = "cuda" if is_cuda else "cpu"
     device = torch.device(hardware)
     print("--------------------------------")
-    print("Running {} epochs on device {}\n".format(options.num_epochs, device))
+    print("Running {} on device {}\n".format(options.network, device))
 
     # Print system environments
     num_gpus = torch.cuda.device_count()
@@ -205,9 +159,8 @@ def main(config_file):
         if options.checkpoint != ""
         else default_checkpoint
     )
-    encoder_checkpoint = checkpoint["model"].get("encoder")
-    decoder_checkpoint = checkpoint["model"].get("decoder")
-    if encoder_checkpoint is not None:
+    model_checkpoint = checkpoint["model"]
+    if model_checkpoint:
         print(
             "[+] Checkpoint\n",
             "Resuming from epoch : {}\n".format(checkpoint["epoch"]),
@@ -252,35 +205,29 @@ def main(config_file):
     )
 
     # Get loss, model
-    criterion = nn.CrossEntropyLoss(
-        ignore_index=train_data_loader.dataset.token_to_id[PAD]
-    ).to(device)
-    enc, dec = get_network(
-        options.network.enc,
-        options.network.dec,
+    model = get_network(
+        options.network,
         options,
-        encoder_checkpoint,
-        decoder_checkpoint,
+        model_checkpoint,
         device,
         train_dataset,
     )
-    enc.train()
-    dec.train()
+    model.train()
+    criterion = model.criterion.to(device)
     enc_params_to_optimise = [
-        param for param in enc.parameters() if param.requires_grad
+        param for param in model.encoder.parameters() if param.requires_grad
     ]
     dec_params_to_optimise = [
-        param for param in dec.parameters() if param.requires_grad
+        param for param in model.decoder.parameters() if param.requires_grad
     ]
     params_to_optimise = [*enc_params_to_optimise, *dec_params_to_optimise]
     print(
         "[+] Network\n",
-        "Encoder (# param) : {} ({})\n".format(
-            options.network.enc,
+        "Type: {}\n".format(options.network),
+        "Encoder parameters: {}\n".format(
             sum(p.numel() for p in enc_params_to_optimise),
         ),
-        "Decoder (# param) : {} ({})\n".format(
-            options.network.dec,
+        "Decoder parameters: {} \n".format(
             sum(p.numel() for p in dec_params_to_optimise),
         ),
     )
@@ -295,14 +242,8 @@ def main(config_file):
     optimizer_state = checkpoint.get("optimizer")
     if optimizer_state:
         optimizer.load_state_dict(optimizer_state)
-    # Set the learning rate instead of using the previous state.
-    # The scheduler somehow overwrites the LR to the initial LR after loading,
-    # which would always reset it to the first used learning rate instead of
-    # the one from the previous checkpoint. So might as well set it manually.
     for param_group in optimizer.param_groups:
         param_group["initial_lr"] = options.optimizer.lr
-    # Decay learning rate by a factor of lr_factor (default: 0.1)
-    # every lr_epochs (default: 3)
     if options.optimizer.is_cycle:
         cycle = len(train_data_loader) * options.num_epochs
         lr_scheduler = CircularLRBeta(
@@ -335,10 +276,6 @@ def main(config_file):
     for epoch in range(options.num_epochs):
         start_time = time.time()
 
-        # N cycle
-        # if lr_scheduler:
-        #     lr_scheduler.step()
-
         epoch_text = "[{current:>{pad}}/{end}] Epoch {epoch}".format(
             current=epoch + 1,
             end=options.num_epochs,
@@ -349,8 +286,7 @@ def main(config_file):
         # Train
         train_result = run_epoch(
             train_data_loader,
-            enc,
-            dec,
+            model,
             epoch_text,
             criterion,
             optimizer,
@@ -366,15 +302,12 @@ def main(config_file):
             train_result["correct_symbols"] / train_result["total_symbols"]
         )
         train_accuracy.append(train_epoch_accuracy)
-        # epoch_lr = lr_scheduler.get_lr() [0] # N cycle
         epoch_lr = lr_scheduler.get_lr()  # cycle
-        # learning_rates.append(epoch_lr)
 
         # Validation
         validation_result = run_epoch(
             validation_data_loader,
-            enc,
-            dec,
+            model,
             epoch_text,
             criterion,
             optimizer,
@@ -400,7 +333,7 @@ def main(config_file):
                 "validation_accuracy": validation_accuracy,
                 "lr": learning_rates,
                 "grad_norm": grad_norms,
-                "model": {"encoder": enc.state_dict(), "decoder": dec.state_dict()},
+                "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
             },
             prefix=options.prefix,
@@ -437,8 +370,7 @@ def main(config_file):
                 train_epoch_accuracy,
                 validation_result["loss"],
                 validation_epoch_accuracy,
-                enc,
-                dec,
+                model,
             )
 
 

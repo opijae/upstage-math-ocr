@@ -2,33 +2,28 @@ import torch.optim as optim
 
 # from networks.crnn import Encoder, Decoder
 from networks.crnn import CNN, RNN
-from networks.transformer import (
-    TransformerEncoderFor2DFeatures,
-    AttentionDecoder,
-    TransformerDecoder,
-)
+from networks.transformer import SATRN
 from dataset import START, PAD, END
 
 
 def get_network(
-    enc_type,
-    dec_type,
-    options,
-    encoder_checkpoint,
-    decoder_checkpoint,
+    model_type,
+    FLAGS,
+    model_checkpoint,
     device,
     train_dataset,
 ):
+    """
     enc, dec = None, None
 
     if enc_type == "Transformer":
         enc = TransformerEncoderFor2DFeatures(
-            input_size=options.data.rgb,
-            hidden_dim=options.transformer.encoder_dim,
-            filter_size=options.transformer.filter_size,
-            head_num=8,
-            layer_num=options.transformer.encoder_layers,
-            dropout_rate=options.dropout_rate,
+            input_size=FLAGS.data.rgb,
+            hidden_dim=FLAGS.SATRN.encoder.hidden_dim,
+            filter_size=FLAGS.SATRN.encoder.filter_dim,
+            head_num=FLAGS.SATRN.encoder.head_num,
+            layer_num=FLAGS.SATRN.encoder.layer_num,
+            dropout_rate=FLAGS.dropout_rate,
             checkpoint=encoder_checkpoint,
         ).to(device)
     elif enc_type == "CRNN":
@@ -43,15 +38,15 @@ def get_network(
 
     if dec_type == "Transformer":
         dec = TransformerDecoder(
-            len(train_dataset.id_to_token),
-            src_dim=options.transformer.src_dim,
-            hidden_dim=options.transformer.hidden_dim,
-            filter_dim=options.transformer.filter_dim,
-            head_num=options.transformer.head_num,
-            dropout_rate=options.dropout_rate,
+            num_classes=len(train_dataset.id_to_token),
+            src_dim=FLAGS.SATRN.decoder.src_dim,
+            hidden_dim=FLAGS.SATRN.decoder.hidden_dim,
+            filter_dim=FLAGS.SATRN.decoder.filter_dim,
+            head_num=FLAGS.SATRN.decoder.head_num,
+            dropout_rate=FLAGS.dropout_rate,
             pad_id=train_dataset.token_to_id[PAD],
             st_id=train_dataset.token_to_id[START],
-            layer_num=options.transformer.dec_layers,
+            layer_num=FLAGS.SATRN.decoder.layer_num,
             checkpoint=decoder_checkpoint,
         ).to(device)
     elif dec_type == "Attention":
@@ -78,6 +73,17 @@ def get_network(
         raise NotImplementedError
 
     return enc, dec
+    """
+    model = None
+
+    if model_type == "SATRN":
+        model = SATRN(FLAGS, train_dataset, model_checkpoint).to(device)
+    elif model_type == "CRNN":
+        model = CRNN()
+    elif model_type == "FAN":
+        model = FAN()
+
+    return model
 
 
 def get_optimizer(optimizer, params, lr, weight_decay=None):
@@ -90,7 +96,7 @@ def get_optimizer(optimizer, params, lr, weight_decay=None):
     return optimizer
 
 
-def get_loss_fn(decoder):
+def get_loss_fn(model):
     if decoder == "CRNN":
         criterion = torch.nn.CTCLoss(
             ignore_index=train_data_loader.dataset.token_to_id[END]
