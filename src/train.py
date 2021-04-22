@@ -211,16 +211,12 @@ def main(config_file):
         print(
             "[+] Checkpoint\n",
             "Resuming from epoch : {}\n".format(checkpoint["epoch"]),
-            "Train Accuracy : {train_accuracy:.5f}\n".format(
-                checkpoint["train_accuracy"][-1]
+            "Train Accuracy : {:.5f}\n".format(checkpoint["train_accuracy"][-1]),
+            "Train Loss : {:.5f}\n".format(checkpoint["train_losses"][-1]),
+            "Validation Accuracy : {:.5f}\n".format(
+                checkpoint["validation_accuracy"][-1]
             ),
-            "Train Loss : {train_loss:.5f}\n".format(checkpoint["train_losses"][-1]),
-            "Validation Accuracy : {validation_accuracy:.5f}\n".format(
-                ["validation_accuracy"][-1]
-            ),
-            "Validation Loss : {validation_loss:.5f}\n".format(
-                ["validation_losses"][-1]
-            ),
+            "Validation Loss : {:.5f}\n".format(checkpoint["validation_losses"][-1]),
         )
 
     # Get data
