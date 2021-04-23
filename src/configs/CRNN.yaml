@@ -1,0 +1,39 @@
+network:
+  enc: "CRNN"  # Transformer, CRNN
+  dec: "CRNN"  # Transformer, Attention, CRNN
+input_size:
+  height: 128
+  width: 128
+hidden_dim: 256
+checkpoint: ""
+prefix: "./log/crnn_attention_upstage"
+
+data:
+  gt_paths:
+    - "/root/data/Upstage/print/gt.txt"
+    # - "/root/data/Aida/gt.txt"
+    # - "/root/data/CROHME/gt.txt"
+  token_paths:
+    - "/root/data/Upstage/print/tokens.txt" 
+    # - "/root/data/Aida/tokens.txt"
+  dataset_proportions:
+    - 1.0
+  split_proportions:
+    train: 0.8
+    valid: 0.2
+  crop: True
+  rgb: 1    # 3 for color, 1 for greyscale
+  
+batch_size: 16
+num_workers: 4
+num_epochs: 30
+print_epochs: 1
+dropout_rate: 0.1
+teacher_forcing_ratio: 0.5
+max_grad_norm: 2.0
+seed: 1234
+optimizer:
+  optimizer: 'Adam' # Adam, Adadelta
+  lr: 5e-4 # 1e-4
+  weight_decay: 1e-4
+  is_cycle: True
