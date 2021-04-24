@@ -14,7 +14,7 @@ SATRN:
     filter_dim: 512
     layer_num: 3
     head_num: 8
-checkpoint: "./log/tryout/checkpoints/0007.pth"
+checkpoint: ""
 prefix: "./log/tryout"
 
 data:

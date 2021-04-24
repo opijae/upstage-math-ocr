@@ -105,7 +105,7 @@ def run_epoch(
 
             losses.append(loss.item())
 
-            expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
+            expected[expected == data_loader.dataset.token_to_id[PAD]] = -1     # copmarison between elements excpet PAD
             correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
             total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
 

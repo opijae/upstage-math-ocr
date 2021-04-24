@@ -720,7 +720,6 @@ class SATRN(nn.Module):
 
     def forward(self, input, expected, is_train, teacher_forcing_ratio):
         enc_result = self.encoder(input)
-        import pdb; pdb.set_trace()
         dec_result = self.decoder(
             enc_result,
             expected[:, :-1],
