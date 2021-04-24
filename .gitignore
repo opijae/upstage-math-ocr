@@ -3,6 +3,7 @@ data/
 tensorboard/
 log.txt
 log/
+.vscode
 
 # Node
 node_modules/
