@@ -19,7 +19,7 @@ pip install tensorboardX tqdm pyyaml psutil
 
 ## Supported Models
 
-- [CRNN][arxiv-zhang18]
+- Attention Decoder
 - [SATRN](https://github.com/clovaai/SATRN)
 
 
