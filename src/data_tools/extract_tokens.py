@@ -10,17 +10,20 @@ def parse_symbols(truth):
 
 def create_tokens(groundtruth, output="tokens.txt"):
     with open(groundtruth, "r") as fd:
-        unique_symbols = set()
-        reader = csv.reader(fd, delimiter="\t")
-        for _, truth in reader:
-            truth_symbols = parse_symbols(truth)
-            unique_symbols = unique_symbols.union(truth_symbols)
+        data = fd.read()
 
-        symbols = list(unique_symbols)
-        symbols.sort()
-        with open(output, "w") as output_fd:
-            writer = csv.writer(output_fd, delimiter="\n")
-            writer.writerow(symbols)
+    unique_symbols = set()
+    data = data.split("\n")
+    data = [x.split("\t") for x in data]
+    for _, truth in data:
+        truth_symbols = parse_symbols(truth)
+        unique_symbols = unique_symbols.union(truth_symbols)
+
+    symbols = list(unique_symbols)
+    symbols.sort()
+    with open(output, "w") as output_fd:
+        writer = csv.writer(output_fd, delimiter="\n")
+        writer.writerow(symbols)
 
 
 if __name__ == "__main__":
