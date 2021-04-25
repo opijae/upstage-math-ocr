@@ -7,9 +7,13 @@ use_cuda = torch.cuda.is_available()
 default_checkpoint = {
     "epoch": 0,
     "train_losses": [],
-    "train_accuracy": [],
+    "train_symbol_accuracy": [],
+    "train_sentence_accuracy": [],
+    "train_wer": [],
     "validation_losses": [],
-    "validation_accuracy": [],
+    "validation_symbol_accuracy": [],
+    "validation_sentence_accuracy": [],
+    "validation_wer": [],
     "lr": [],
     "grad_norm": [],
     "model": {},
@@ -42,15 +46,23 @@ def write_tensorboard(
     epoch,
     grad_norm,
     train_loss,
-    train_accuracy,
+    train_symbol_accuracy,
+    train_sentence_accuracy,
+    train_wer,
     validation_loss,
-    validation_accuracy,
+    validation_symbol_accuracy,
+    validation_sentence_accuracy,
+    validation_wer,
     model,
 ):
     writer.add_scalar("train_loss", train_loss, epoch)
-    writer.add_scalar("train_accuracy", train_accuracy, epoch)
+    writer.add_scalar("train_symbol_accuracy", train_symbol_accuracy, epoch)
+    writer.add_scalar("train_sentence_accuracy",train_sentence_accuracy,epoch)
+    writer.add_scalar("train_wer", train_wer, epoch)
     writer.add_scalar("validation_loss", validation_loss, epoch)
-    writer.add_scalar("validation_accuracy", validation_accuracy, epoch)
+    writer.add_scalar("validation_symbol_accuracy", validation_symbol_accuracy, epoch)
+    writer.add_scalar("validation_sentence_accuracy",validation_sentence_accuracy,epoch)
+    writer.add_scalar("validation_wer",validation_wer,epoch)
     writer.add_scalar("grad_norm", grad_norm, epoch)
 
     for name, param in model.encoder.named_parameters():

@@ -8,3 +8,4 @@ numpy==1.15.4
 torchvision==0.2.1
 Pillow==8.1.1
 tensorboardX==1.5
+editdistance==0.5.3

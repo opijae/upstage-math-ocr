@@ -24,6 +24,7 @@ from utils import get_network, get_optimizer
 from dataset import dataset_loader, START, PAD
 from scheduler import CircularLRBeta
 
+from metrics import word_error_rate,sentence_acc
 
 def token_to_string(tokens, data_loader):
     result = []
@@ -36,6 +37,18 @@ def token_to_string(tokens, data_loader):
         result.append(string)
     return result
 
+def id_to_string(ids, data_loader):
+    result = []
+    special_ids=[data_loader.dataset.token_to_id["<PAD>"],data_loader.dataset.token_to_id["<SOS>"],data_loader.dataset.token_to_id["<EOS>"]]
+    for example in ids:
+        string = ""
+        for id in example:
+            id = id.item()
+            if id not in special_ids:
+                if id !=-1:
+                    string += data_loader.dataset.id_to_token[id] + " "
+        result.append(string)
+    return result
 
 def run_epoch(
     data_loader,
@@ -60,6 +73,10 @@ def run_epoch(
     grad_norms = []
     correct_symbols = 0
     total_symbols = 0
+    wer=0
+    num_wer=0
+    sent_acc=0
+    num_sent_acc=0
 
     with tqdm(
         desc="{} ({})".format(epoch_text, "Train" if train else "Validation"),
@@ -106,6 +123,12 @@ def run_epoch(
             losses.append(loss.item())
 
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
+            expected_str = id_to_string(expected, data_loader)
+            sequence_str = id_to_string(sequence, data_loader)
+            wer+=word_error_rate(sequence_str,expected_str)
+            num_wer+=1
+            sent_acc+=sentence_acc(sequence_str,expected_str)
+            num_sent_acc+=1
             correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
             total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
 
@@ -122,10 +145,15 @@ def run_epoch(
         "loss": np.mean(losses),
         "correct_symbols": correct_symbols,
         "total_symbols": total_symbols,
+        "wer": wer,
+        "num_wer":num_wer,
+        "sent_acc": sent_acc,
+        "num_sent_acc":num_sent_acc,
+
     }
     if train:
-        # result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
-        result["grad_norm"] = np.mean(grad_norms)
+         result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
+        #result["grad_norm"] = np.mean(grad_norms)
 
     return result
 
@@ -164,10 +192,18 @@ def main(config_file):
         print(
             "[+] Checkpoint\n",
             "Resuming from epoch : {}\n".format(checkpoint["epoch"]),
-            "Train Accuracy : {:.5f}\n".format(checkpoint["train_accuracy"][-1]),
+            "Train Symbol Accuracy : {:.5f}\n".format(checkpoint["train_symbol_accuracy"][-1]),
+            "Train Sentence Accuracy : {:.5f}\n".format(checkpoint["train_sentence_accuracy"][-1]),
+            "Train WER : {:.5f}\n".format(checkpoint["train_wer"][-1]),
             "Train Loss : {:.5f}\n".format(checkpoint["train_losses"][-1]),
-            "Validation Accuracy : {:.5f}\n".format(
-                checkpoint["validation_accuracy"][-1]
+            "Validation Symbol Accuracy : {:.5f}\n".format(
+                checkpoint["validation_symbol_accuracy"][-1]
+            ),
+            "Validation Sentence Accuracy : {:.5f}\n".format(
+                checkpoint["validation_sentence_accuracy"][-1]
+            ),
+            "Validation WER : {:.5f}\n".format(
+                checkpoint["validation_wer"][-1]
             ),
             "Validation Loss : {:.5f}\n".format(checkpoint["validation_losses"][-1]),
         )
@@ -265,9 +301,13 @@ def main(config_file):
         options.print_epochs = options.num_epochs
     writer = init_tensorboard(name=options.prefix.strip("-"))
     start_epoch = checkpoint["epoch"]
-    train_accuracy = checkpoint["train_accuracy"]
+    train_symbol_accuracy = checkpoint["train_symbol_accuracy"]
+    train_sentence_accuracy=checkpoint["train_sentence_accuracy"]
+    train_wer=checkpoint["train_wer"]
     train_losses = checkpoint["train_losses"]
-    validation_accuracy = checkpoint["validation_accuracy"]
+    validation_symbol_accuracy = checkpoint["validation_symbol_accuracy"]
+    validation_sentence_accuracy=checkpoint["validation_sentence_accuracy"]
+    validation_wer=checkpoint["validation_wer"]
     validation_losses = checkpoint["validation_losses"]
     learning_rates = checkpoint["lr"]
     grad_norms = checkpoint["grad_norm"]
@@ -296,12 +336,24 @@ def main(config_file):
             device,
             train=True,
         )
+
+
+
         train_losses.append(train_result["loss"])
         grad_norms.append(train_result["grad_norm"])
-        train_epoch_accuracy = (
+        train_epoch_symbol_accuracy = (
             train_result["correct_symbols"] / train_result["total_symbols"]
         )
-        train_accuracy.append(train_epoch_accuracy)
+        train_symbol_accuracy.append(train_epoch_symbol_accuracy)
+        train_epoch_sentence_accuracy = (
+                train_result["sent_acc"] / train_result["num_sent_acc"]
+        )
+
+        train_sentence_accuracy.append(train_epoch_sentence_accuracy)
+        train_epoch_wer = (
+                train_result["wer"] / train_result["num_wer"]
+        )
+        train_wer.append(train_epoch_wer)
         epoch_lr = lr_scheduler.get_lr()  # cycle
 
         # Validation
@@ -318,19 +370,32 @@ def main(config_file):
             train=False,
         )
         validation_losses.append(validation_result["loss"])
-        validation_epoch_accuracy = (
+        validation_epoch_symbol_accuracy = (
             validation_result["correct_symbols"] / validation_result["total_symbols"]
         )
-        validation_accuracy.append(validation_epoch_accuracy)
+        validation_symbol_accuracy.append(validation_epoch_symbol_accuracy)
+
+        validation_epoch_sentence_accuracy = (
+            validation_result["sent_acc"] / validation_result["num_sent_acc"]
+        )
+        validation_sentence_accuracy.append(validation_epoch_sentence_accuracy)
+        validation_epoch_wer = (
+                validation_result["wer"] / validation_result["num_wer"]
+        )
+        validation_wer.append(validation_epoch_wer)
 
         # Save checkpoint
         save_checkpoint(
             {
                 "epoch": start_epoch + epoch + 1,
                 "train_losses": train_losses,
-                "train_accuracy": train_accuracy,
+                "train_symbol_accuracy": train_symbol_accuracy,
+                "train_sentence_accuracy": train_sentence_accuracy,
+                "train_wer":train_wer,
                 "validation_losses": validation_losses,
-                "validation_accuracy": validation_accuracy,
+                "validation_symbol_accuracy": validation_symbol_accuracy,
+                "validation_sentence_accuracy":validation_sentence_accuracy,
+                "validation_wer":validation_wer,
                 "lr": learning_rates,
                 "grad_norm": grad_norms,
                 "model": model.state_dict(),
@@ -345,17 +410,25 @@ def main(config_file):
         if epoch % options.print_epochs == 0 or epoch == options.num_epochs - 1:
             output_string = (
                 "{epoch_text}: "
-                "Train Accuracy = {train_accuracy:.5f}, "
+                "Train Symbol Accuracy = {train_symbol_accuracy:.5f}, "
+                "Train Sentence Accuracy = {train_sentence_accuracy:.5f}, "
+                "Train WER = {train_wer:.5f}, "
                 "Train Loss = {train_loss:.5f}, "
-                "Validation Accuracy = {validation_accuracy:.5f}, "
+                "Validation Symbol Accuracy = {validation_symbol_accuracy:.5f}, "
+                "Validation Sentence Accuracy = {validation_sentence_accuracy:.5f}, "
+                "Validation WER = {validation_wer:.5f}, "
                 "Validation Loss = {validation_loss:.5f}, "
                 "lr = {lr} "
                 "(time elapsed {time})"
             ).format(
                 epoch_text=epoch_text,
-                train_accuracy=train_epoch_accuracy,
+                train_symbol_accuracy=train_epoch_symbol_accuracy,
+                train_sentence_accuracy=train_epoch_sentence_accuracy,
+                train_wer=train_epoch_wer,
                 train_loss=train_result["loss"],
-                validation_accuracy=validation_epoch_accuracy,
+                validation_symbol_accuracy=validation_epoch_symbol_accuracy,
+                validation_sentence_accuracy=validation_epoch_sentence_accuracy,
+                validation_wer=validation_epoch_wer,
                 validation_loss=validation_result["loss"],
                 lr=epoch_lr,
                 time=elapsed_time,
@@ -367,9 +440,13 @@ def main(config_file):
                 start_epoch + epoch + 1,
                 train_result["grad_norm"],
                 train_result["loss"],
-                train_epoch_accuracy,
+                train_epoch_symbol_accuracy,
+                train_epoch_sentence_accuracy,
+                train_epoch_wer,
                 validation_result["loss"],
-                validation_epoch_accuracy,
+                validation_epoch_symbol_accuracy,
+                validation_epoch_sentence_accuracy,
+                validation_epoch_wer,
                 model,
             )
 

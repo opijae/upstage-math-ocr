@@ -1,7 +1,7 @@
 import torch.optim as optim
 
 # from networks.crnn import Encoder, Decoder
-from networks.crnn import CNN, RNN
+#from networks.crnn import CNN, RNN
 from networks.transformer import SATRN
 from dataset import START, PAD, END
 
