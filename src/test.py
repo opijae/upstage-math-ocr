@@ -11,13 +11,16 @@ import csv
 from torch.utils.data import DataLoader
 import argparse
 import random
+from tqdm import tqdm
 
 def main(config_file):
     options = Flags(config_file).get()
+
     torch.manual_seed(options.seed)
     random.seed(options.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
     is_cuda = torch.cuda.is_available()
     hardware = "cuda" if is_cuda else "cpu"
     device = torch.device(hardware)
@@ -25,8 +28,6 @@ def main(config_file):
     print("Running {} on device {}\n".format(options.network, device))
 
 
-
-    # Load checkpoint and print result
     checkpoint = load_checkpoint(options.checkpoint, cuda=is_cuda)
     model_checkpoint = checkpoint["model"]
     if model_checkpoint:
@@ -35,10 +36,9 @@ def main(config_file):
             "Resuming from epoch : {}\n".format(checkpoint["epoch"]),
         )
 
-    # Get data
+
     transformed = transforms.Compose(
         [
-            # Resize so all images have the same size
             transforms.Resize((options.input_size.height, options.input_size.width)),
             transforms.ToTensor(),
         ]
@@ -50,7 +50,11 @@ def main(config_file):
         with open(path, "r") as fd:
             reader = csv.reader(fd, delimiter="\t")
             data = list(reader)
+            random.shuffle(data)
         data = [[os.path.join(root, x[0]), x[1]] for x in data]
+        if options.data.split_proportions.train != 1.0:
+            dataset_len = round(len(data) * options.data.split_proportions.train)
+            data=data[dataset_len:]
         test_data+=data
     test_dataset = LoadDataset(
         test_data, options.data.token_paths, crop=False, transform=transformed, rgb=options.data.rgb
@@ -63,12 +67,13 @@ def main(config_file):
         collate_fn=collate_batch,
     )
 
+
+
     print(
         "[+] Data\n",
         "The number of test samples : {}\n".format(len(test_dataset)),
     )
 
-    # Get loss, model
     model = get_network(
         options.network,
         options,
@@ -83,9 +88,8 @@ def main(config_file):
     num_wer=0
     sent_acc=0
     num_sent_acc=0
-    for d in test_data_loader:
+    for d in tqdm(test_data_loader):
         input = d["image"].to(device)
-        curr_batch_size = len(input)
         expected = d["truth"]["encoded"].to(device)
         expected[expected == -1] = test_data_loader.dataset.token_to_id[PAD]
         output = model(input, expected, False, 0.0)
@@ -95,16 +99,15 @@ def main(config_file):
         expected[expected == test_data_loader.dataset.token_to_id[PAD]] = -1
         expected_str = id_to_string(expected, test_data_loader)
         sequence_str = id_to_string(sequence, test_data_loader)
-        print(expected_str[0]+":"+sequence_str[0])
         wer += word_error_rate(sequence_str, expected_str)
         num_wer += 1
         sent_acc += sentence_acc(sequence_str, expected_str)
         num_sent_acc += 1
         correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
         total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
-    print(wer/num_wer)
-    print(sent_acc/num_sent_acc)
-    print(correct_symbols/total_symbols)
+    print("wer",wer/num_wer)
+    print("sentence acc",sent_acc/num_sent_acc)
+    print("symbol acc",correct_symbols/total_symbols)
 
 
 if __name__ == "__main__":
