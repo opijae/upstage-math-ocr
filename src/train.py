@@ -121,7 +121,7 @@ def run_epoch(
                 optimizer.step()
 
             losses.append(loss.item())
-
+            
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
             expected_str = id_to_string(expected, data_loader)
             sequence_str = id_to_string(sequence, data_loader)
