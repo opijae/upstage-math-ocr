@@ -1,6 +1,5 @@
 import torch.optim as optim
 
-# from networks.crnn import Encoder, Decoder
 from networks.Attention import Attention
 from networks.SATRN import SATRN
 from dataset import START, PAD, END

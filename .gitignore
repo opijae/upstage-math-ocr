@@ -4,6 +4,7 @@ tensorboard/
 log.txt
 log/
 .vscode
+.DS_Store
 
 # Node
 node_modules/
