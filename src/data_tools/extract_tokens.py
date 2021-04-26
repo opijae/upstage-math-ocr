@@ -8,7 +8,7 @@ def parse_symbols(truth):
     return unique_symbols
 
 
-def create_tokens(groundtruth, output="tokens.txt"):
+def create_tokens(groundtruth, output="tokens.txt", write_output=True):
     with open(groundtruth, "r") as fd:
         unique_symbols = set()
         reader = csv.reader(fd, delimiter="\t")
@@ -16,11 +16,15 @@ def create_tokens(groundtruth, output="tokens.txt"):
             truth_symbols = parse_symbols(truth)
             unique_symbols = unique_symbols.union(truth_symbols)
 
-        symbols = list(unique_symbols)
-        symbols.sort()
+    symbols = list(unique_symbols)
+    symbols.sort()
+    
+    if write_output:
         with open(output, "w") as output_fd:
             writer = csv.writer(output_fd, delimiter="\n")
             writer.writerow(symbols)
+    
+    return symbols
 
 
 if __name__ == "__main__":

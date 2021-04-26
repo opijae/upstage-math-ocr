@@ -12,41 +12,6 @@ PAD = "<PAD>"
 SPECIAL_TOKENS = [START, END, PAD]
 
 
-# There are so many symbols (mostly escape sequences) that are in the test sets but not
-# in the training set.
-def remove_unknown_tokens(truth):
-    # Remove \mathrm and \vtop are only present in the test sets, but not in the
-    # training set. They are purely for formatting anyway.
-    remaining_truth = truth.replace("\\mathrm", "")
-    remaining_truth = remaining_truth.replace("\\vtop", "")
-    # \; \! are spaces and only present in 2014's test set
-    remaining_truth = remaining_truth.replace("\\;", " ")
-    remaining_truth = remaining_truth.replace("\\!", " ")
-    remaining_truth = remaining_truth.replace("\\ ", " ")
-    # There's one occurrence of \dots in the 2013 test set, but it wasn't present in the
-    # training set. It's either \ldots or \cdots in math mode, which are essentially
-    # equivalent.
-    remaining_truth = remaining_truth.replace("\\dots", "\\ldots")
-    # Again, \lbrack and \rbrack where not present in the training set, but they render
-    # similar to \left[ and \right] respectively.
-    remaining_truth = remaining_truth.replace("\\lbrack", "\\left[")
-    remaining_truth = remaining_truth.replace("\\rbrack", "\\right]")
-    # Same story, where \mbox = \leavemode\hbox
-    remaining_truth = remaining_truth.replace("\\hbox", "\\mbox")
-    # There is no reason to use \lt or \gt instead of < and > in math mode. But the
-    # training set does. They are not even LaTeX control sequences but are used in
-    # MathJax (to prevent code injection).
-    remaining_truth = remaining_truth.replace("<", "\\lt")
-    remaining_truth = remaining_truth.replace(">", "\\gt")
-    # \parallel renders to two vertical bars
-    remaining_truth = remaining_truth.replace("\\parallel", "||")
-    # Some capital letters are not in the training set...
-    remaining_truth = remaining_truth.replace("O", "o")
-    remaining_truth = remaining_truth.replace("W", "w")
-    remaining_truth = remaining_truth.replace("\\Pi", "\\pi")
-    return remaining_truth
-
-
 # Rather ignorant way to encode the truth, but at least it works.
 def encode_truth(truth, token_to_id):
     # TODO: tokens in test set but not in train set -> UNK?
@@ -55,6 +20,7 @@ def encode_truth(truth, token_to_id):
         if token not in token_to_id:
             raise Exception("Truth contains unknown token")
     truth_tokens = [token_to_id[x] for x in truth_tokens]
+    if '' in truth_tokens: truth_tokens.remove('')
     return truth_tokens
 
 
@@ -71,7 +37,7 @@ def load_vocab(tokens_paths):
     return token_to_id, id_to_token
 
 
-def split_gt(groundtruth, validation_percent=0.2, proportion=1.0):
+def split_gt(groundtruth, proportion=1.0, test_percent=None):
     root = os.path.join(os.path.dirname(groundtruth), "images")
     with open(groundtruth, "r") as fd:
         reader = csv.reader(fd, delimiter="\t")
@@ -79,9 +45,13 @@ def split_gt(groundtruth, validation_percent=0.2, proportion=1.0):
         random.shuffle(data)
         dataset_len = round(len(data) * proportion)
         data = data[:dataset_len]
-        validation_len = round(len(data) * validation_percent)
-    data = [[os.path.join(root, x[0]), x[1]] for x in data]
-    return data[validation_len:], data[:validation_len]
+        data = [[os.path.join(root, x[0]), x[1]] for x in data]
+    
+    if test_percent:
+        test_len = round(len(data) * test_percent)
+        return data[test_len:], data[:test_len]
+    else:
+        return data
 
 
 def collate_batch(data):
@@ -167,49 +137,48 @@ class LoadDataset(Dataset):
         return {"path": item["path"], "truth": item["truth"], "image": image}
 
 
-def dataset_loader(
-    gt_paths,
-    token_paths,
-    dataset_proportions,
-    train_proportion,
-    valid_proportion,
-    crop=False,
-    transform=None,
-    batch_size=16,
-    num_workers=4,
-    rgb=3,
-):
+def dataset_loader(options, transformed):
 
     # Read data
     train_data, valid_data = [], []
-    for i, path in enumerate(gt_paths):
-        prop = 1.0
-        if len(dataset_proportions) > i:
-            prop = dataset_proportions[i]
-        train, valid = split_gt(path, valid_proportion, prop)
-        train_data += train
-        valid_data += valid
+    if options.data.random_split:
+        for i, path in enumerate(options.data.train):
+            prop = 1.0
+            if len(options.data.dataset_proportions) > i:
+                prop = options.data.dataset_proportions[i]
+            train, valid = split_gt(path, prop, options.data.test_proportions)
+            train_data += train
+            valid_data += valid
+    else:
+        for i, path in enumerate(options.data.train):
+            prop = 1.0
+            if len(options.data.dataset_proportions) > i:
+                prop = options.data.dataset_proportions[i]
+            train_data += split_gt(path, prop)
+        for i, path in enumerate(options.data.test):
+            valid = split_gt(path)
+            valid_data += valid
 
     # Load data
     train_dataset = LoadDataset(
-        train_data, token_paths, crop=crop, transform=transform, rgb=rgb
+        train_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb
     )
     train_data_loader = DataLoader(
         train_dataset,
-        batch_size=batch_size,
+        batch_size=options.batch_size,
         shuffle=True,
-        num_workers=num_workers,
+        num_workers=options.num_workers,
         collate_fn=collate_batch,
     )
 
     valid_dataset = LoadDataset(
-        valid_data, token_paths, crop=crop, transform=transform, rgb=rgb
+        valid_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb
     )
     valid_data_loader = DataLoader(
         valid_dataset,
-        batch_size=batch_size,
+        batch_size=options.batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=options.num_workers,
         collate_fn=collate_batch,
     )
 

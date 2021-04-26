@@ -180,23 +180,7 @@ def main(config_file):
             transforms.ToTensor(),
         ]
     )
-    (
-        train_data_loader,
-        validation_data_loader,
-        train_dataset,
-        valid_dataset,
-    ) = dataset_loader(
-        options.data.gt_paths,
-        options.data.token_paths,
-        options.data.dataset_proportions,
-        options.data.split_proportions.train,
-        options.data.split_proportions.valid,
-        crop=options.data.crop,
-        transform=transformed,
-        batch_size=options.batch_size,
-        num_workers=options.num_workers,
-        rgb=options.data.rgb,
-    )
+    train_data_loader, validation_data_loader, train_dataset, valid_dataset = dataset_loader(options, transformed)
     print(
         "[+] Data\n",
         "The number of train samples : {}\n".format(len(train_dataset)),

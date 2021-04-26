@@ -242,13 +242,13 @@ class Attention(nn.Module):
         
         self.decoder = AttentionDecoder(
             num_classes=len(train_dataset.id_to_token),
-            src_dim=FLAGS.FAN.src_dim,
-            embedding_dim=FLAGS.FAN.embedding_dim,
-            hidden_dim=FLAGS.FAN.hidden_dim,
+            src_dim=FLAGS.Attention.src_dim,
+            embedding_dim=FLAGS.Attention.embedding_dim,
+            hidden_dim=FLAGS.Attention.hidden_dim,
             pad_id=train_dataset.token_to_id[PAD],
             st_id=train_dataset.token_to_id[START],
-            num_layers=FLAGS.FAN.layer_num,
-            cell_type=FLAGS.FAN.cell_type)
+            num_layers=FLAGS.Attention.layer_num,
+            cell_type=FLAGS.Attention.cell_type)
 
         self.criterion = (
             nn.CrossEntropyLoss()
