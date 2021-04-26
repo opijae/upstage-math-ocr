@@ -10,10 +10,14 @@ from utils import get_network,get_optimizer
 import csv
 from torch.utils.data import DataLoader
 import argparse
+import random
 
 def main(config_file):
     options = Flags(config_file).get()
     torch.manual_seed(options.seed)
+    random.seed(options.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     is_cuda = torch.cuda.is_available()
     hardware = "cuda" if is_cuda else "cpu"
     device = torch.device(hardware)
