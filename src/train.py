@@ -152,8 +152,8 @@ def run_epoch(
 
     }
     if train:
-         result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
-        #result["grad_norm"] = np.mean(grad_norms)
+        #  result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])
+        result["grad_norm"] = np.mean(grad_norms)
 
     return result
 
