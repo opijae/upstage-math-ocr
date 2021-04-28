@@ -130,7 +130,7 @@ class DeepCNN300(nn.Module):
 
         self.block1 = DenseBlock(
             num_features,  # 48
-            growth_rate=growth_rate,  # 48 + growth_rate(16)*depth(24) -> 432
+            growth_rate=growth_rate,  # 48 + growth_rate(24)*depth(16) -> 432
             depth=depth,  # 16?
             dropout_rate=0.2,
         )
@@ -159,7 +159,6 @@ class DeepCNN300(nn.Module):
         out = self.block2(out)
         out_before_trans2 = self.trans2_relu(self.trans2_norm(out))
         out_A = self.trans2_conv(out_before_trans2)
-
         return out_A  # 128 x (16x16)
 
 
