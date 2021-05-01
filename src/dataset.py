@@ -29,9 +29,11 @@ def load_vocab(tokens_paths):
     for tokens_file in tokens_paths:
         with open(tokens_file, "r") as fd:
             reader = fd.read()
-            tokens += reader.split("\n")
+            for token in reader.split("\n"):
+                if token in tokens:
+                    continue
+                tokens.append(token)
     tokens.extend(SPECIAL_TOKENS)
-    tokens = list(set(tokens))
     token_to_id = {tok: i for i, tok in enumerate(tokens)}
     id_to_token = {i: tok for i, tok in enumerate(tokens)}
     return token_to_id, id_to_token
