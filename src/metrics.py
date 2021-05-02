@@ -4,8 +4,10 @@ import numpy as np
 def word_error_rate(predicted_outputs, ground_truths):
 	sum_wer=0.0
 	for output,ground_truth in zip(predicted_outputs,ground_truths):
+		output=output.split(" ")
+		ground_truth=ground_truth.split(" ")
 		distance = editdistance.eval(output, ground_truth)
-		length = len(predicted_outputs)
+		length = max(len(output),len(ground_truth))
 		sum_wer+=(distance/length)
 	return sum_wer/len(predicted_outputs)
 
