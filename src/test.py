@@ -45,16 +45,14 @@ def main(config_file):
     )
 
     test_data=[]
-    for path in options.data.gt_paths:
+    print(options.data)
+    for path in options.data.test:
         root = os.path.join(os.path.dirname(path), "images")
         with open(path, "r") as fd:
             reader = csv.reader(fd, delimiter="\t")
             data = list(reader)
             random.shuffle(data)
         data = [[os.path.join(root, x[0]), x[1]] for x in data]
-        if options.data.split_proportions.train != 1.0:
-            dataset_len = round(len(data) * options.data.split_proportions.train)
-            data=data[dataset_len:]
         test_data+=data
     test_dataset = LoadDataset(
         test_data, options.data.token_paths, crop=False, transform=transformed, rgb=options.data.rgb
@@ -120,5 +118,6 @@ if __name__ == "__main__":
         type=str,
         help="Path of configuration file",
     )
+    # argument for predict vs. test
     parser = parser.parse_args()
     main(parser.config_file)

@@ -14,7 +14,6 @@ SPECIAL_TOKENS = [START, END, PAD]
 
 # Rather ignorant way to encode the truth, but at least it works.
 def encode_truth(truth, token_to_id):
-    # TODO: tokens in test set but not in train set -> UNK?
     truth_tokens = truth.split()
     for token in truth_tokens:
         if token not in token_to_id:
@@ -26,12 +25,14 @@ def encode_truth(truth, token_to_id):
 
 def load_vocab(tokens_paths):
     tokens = []
+    tokens.extend(SPECIAL_TOKENS)
     for tokens_file in tokens_paths:
         with open(tokens_file, "r") as fd:
             reader = fd.read()
-            tokens += reader.split("\n")
-    tokens.extend(SPECIAL_TOKENS)
-    tokens = list(set(tokens))
+            reader = reader.split("\n")
+            for token in reader:
+                if token not in tokens:
+                    tokens.append(token)
     token_to_id = {tok: i for i, tok in enumerate(tokens)}
     id_to_token = {i: tok for i, tok in enumerate(tokens)}
     return token_to_id, id_to_token
@@ -66,8 +67,7 @@ def collate_batch(data):
         "image": torch.stack([d["image"] for d in data], dim=0),
         "truth": {
             "text": [d["truth"]["text"] for d in data],
-            "encoded": torch.tensor(padded_encoded),
-            # "len_mask":
+            "encoded": torch.tensor(padded_encoded)
         },
     }
 
@@ -140,7 +140,7 @@ class LoadDataset(Dataset):
 def dataset_loader(options, transformed):
 
     # Read data
-    train_data, valid_data = [], []
+    train_data, valid_data = [], [] 
     if options.data.random_split:
         for i, path in enumerate(options.data.train):
             prop = 1.0

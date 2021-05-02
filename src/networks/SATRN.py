@@ -308,8 +308,8 @@ class PositionalEncoding2D(nn.Module):
         )
         w_pos_encoding = self.w_linear(w_pos_encoding)  # [1, W, D]
 
-        h_pos_encoding = h_pos_encoding.expand(-1, w, -1)
-        w_pos_encoding = w_pos_encoding.expand(h, -1, -1)
+        h_pos_encoding = h_pos_encoding.expand(-1, w, -1)   # h, w, c/2
+        w_pos_encoding = w_pos_encoding.expand(h, -1, -1)   # h, w, c/2
 
         pos_encoding = torch.cat([h_pos_encoding, w_pos_encoding], dim=2)  # [H, W, 2*D]
 
@@ -359,12 +359,12 @@ class TransformerEncoderFor2DFeatures(nn.Module):
 
     def forward(self, input):
 
-        out = self.shallow_cnn(input)  # [b, c, h*, w*] (h*=8, w*=32)
-        out = self.positional_encoding(out)  # [b, c, h*, w*]
+        out = self.shallow_cnn(input)  # [b, c, h, w]
+        out = self.positional_encoding(out)  # [b, c, h, w]
 
         # flatten
         b, c, h, w = out.size()
-        out = out.view(b, c, h * w).transpose(1, 2)  # [b, h* x w* (L), c]
+        out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
 
         for layer in self.attention_layers:
             out = layer(out)
@@ -523,8 +523,7 @@ class TransformerDecoder(nn.Module):
         else:
             out = []
             num_steps = batch_max_length - 1
-            target = torch.LongTensor(src.size(0)).fill_(self.st_id).to(device)
-
+            target = torch.LongTensor(src.size(0)).fill_(self.st_id).to(device) # [START] token
             features = [None] * self.layer_num
 
             for t in range(num_steps):
@@ -540,12 +539,12 @@ class TransformerDecoder(nn.Module):
                     )
 
                 _out = self.generator(tgt)  # [b, 1, c]
-                target = torch.argmax(_out[:, -1:, :], dim=-1)
-                target = target.squeeze()
-
+                target = torch.argmax(_out[:, -1:, :], dim=-1)  # [b, 1]
+                target = target.squeeze()   # [b]
                 out.append(_out)
-            out = torch.stack(out, dim=1).to(device)
-            out = out.squeeze(2)
+            
+            out = torch.stack(out, dim=1).to(device)    # [b, max length, 1, class length]
+            out = out.squeeze(2)    # [b, max length, class length]
 
         return out
 

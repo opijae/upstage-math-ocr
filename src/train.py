@@ -26,7 +26,7 @@ from scheduler import CircularLRBeta
 
 from metrics import word_error_rate,sentence_acc
 
-def token_to_string(tokens, data_loader):
+def id_to_string(tokens, data_loader):
     result = []
     for example in tokens:
         string = ""
@@ -34,19 +34,6 @@ def token_to_string(tokens, data_loader):
             token = token.item()
             if token != -1:
                 string += data_loader.dataset.id_to_token[token] + " "
-        result.append(string)
-    return result
-
-def id_to_string(ids, data_loader):
-    result = []
-    special_ids=[data_loader.dataset.token_to_id["<PAD>"],data_loader.dataset.token_to_id["<SOS>"],data_loader.dataset.token_to_id["<EOS>"]]
-    for example in ids:
-        string = ""
-        for id in example:
-            id = id.item()
-            if id not in special_ids:
-                if id !=-1:
-                    string += data_loader.dataset.id_to_token[id] + " "
         result.append(string)
     return result
 
@@ -95,11 +82,11 @@ def run_epoch(
             expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
 
             output = model(input, expected, train, teacher_forcing_ratio)
-
+            
             decoded_values = output.transpose(1, 2)
             _, sequence = torch.topk(decoded_values, 1, dim=1)
             sequence = sequence.squeeze(1)
-
+            
             loss = criterion(decoded_values, expected[:, 1:])
 
             if train:
@@ -125,17 +112,17 @@ def run_epoch(
             expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
             expected_str = id_to_string(expected, data_loader)
             sequence_str = id_to_string(sequence, data_loader)
-            wer+=word_error_rate(sequence_str,expected_str)
-            num_wer+=1
-            sent_acc+=sentence_acc(sequence_str,expected_str)
-            num_sent_acc+=1
+            wer += word_error_rate(sequence_str,expected_str)
+            num_wer += 1
+            sent_acc += sentence_acc(sequence_str,expected_str)
+            num_sent_acc += 1
             correct_symbols += torch.sum(sequence == expected[:, 1:], dim=(0, 1)).item()
             total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
 
             pbar.update(curr_batch_size)
 
-    expected = token_to_string(expected, data_loader)
-    sequence = token_to_string(sequence, data_loader)
+    expected = id_to_string(expected, data_loader)
+    sequence = id_to_string(sequence, data_loader)
     print("-" * 10 + "GT ({})".format("train" if train else "valid"))
     print(*expected[:3], sep="\n")
     print("-" * 10 + "PR ({})".format("train" if train else "valid"))
@@ -148,8 +135,7 @@ def run_epoch(
         "wer": wer,
         "num_wer":num_wer,
         "sent_acc": sent_acc,
-        "num_sent_acc":num_sent_acc,
-
+        "num_sent_acc":num_sent_acc
     }
     if train:
         #  result["grad_norm"] = np.mean([tensor.cpu() for tensor in grad_norms])

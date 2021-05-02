@@ -35,30 +35,29 @@ class CNN(nn.Module):
             return cnn
 
         self.conv0 = convRelu(0)
-        self.pooling0 = nn.MaxPool2d(2, 2)  # 64x16x64
+        self.pooling0 = nn.MaxPool2d(2, 2)
         self.conv1 = convRelu(1)
-        self.pooling1 = nn.MaxPool2d(2, 2)  # 128x8x32
+        self.pooling1 = nn.MaxPool2d(2, 2)
         self.conv2 = convRelu(2, True)
         self.conv3 = convRelu(3)
-        self.pooling3 = nn.MaxPool2d((2, 2), (2, 1), (0, 1))  # 256x4x16
+        self.pooling3 = nn.MaxPool2d((2, 2), (2, 1), (0, 1))
         self.conv4 = convRelu(4, True)
         self.conv5 = convRelu(5)
-        self.pooling5 = nn.MaxPool2d((2, 2), (2, 1), (0, 1))  # 512x2x16
-        self.conv6 = convRelu(6, True)  # 512x1x16
+        self.pooling5 = nn.MaxPool2d((2, 2), (2, 1), (0, 1))
+        self.conv6 = convRelu(6, True)
     
     def forward(self, input):
-        out = self.conv0(input)
-        out = self.pooling0(out)
-        out = self.conv1(out)
-        out = self.pooling1(out)
-        out = self.conv2(out)
-        out = self.conv3(out)
-        out = self.pooling3(out)
-        out = self.conv4(out)
-        out = self.conv5(out)
-        out = self.pooling5(out)
-        out = self.conv6(out)
-                
+        out = self.conv0(input)     # [batch size, 64, 128, 128]
+        out = self.pooling0(out)    # [batch size, 64, 64, 64]
+        out = self.conv1(out)       # [batch size, 128, 64, 64]
+        out = self.pooling1(out)    # [batch size, 128, 32, 32]
+        out = self.conv2(out)       # [batch size, 256, 32, 32]
+        out = self.conv3(out)       # [batch size, 256, 32, 32]
+        out = self.pooling3(out)    # [batch size, 256, 16, 33]
+        out = self.conv4(out)       # [batch size, 512, 16, 33]
+        out = self.conv5(out)       # [batch size, 512, 16, 33]
+        out = self.pooling5(out)    # [batch size, 512, 8, 34]
+        out = self.conv6(out)       # [batch size, 512, 7, 33]
         return out
 
 class AttentionCell(nn.Module):
@@ -100,14 +99,14 @@ class AttentionCell(nn.Module):
 
         self.hidden_dim = hidden_dim
 
-    def forward(self, prev_hidden, src, tgt):
-        src_features = self.i2h(src)  # [b, L, c] (image features)
+    def forward(self, prev_hidden, src, tgt):   # src: [b, L, c]
+        src_features = self.i2h(src)  # [b, L, h]
         if self.num_layers == 1:
-            prev_hidden_proj = self.h2h(prev_hidden[0]).unsqueeze(1)
+            prev_hidden_proj = self.h2h(prev_hidden[0]).unsqueeze(1)    # [b, 1, h]
         else:
-            prev_hidden_proj = self.h2h(prev_hidden[-1][0]).unsqueeze(1)
+            prev_hidden_proj = self.h2h(prev_hidden[-1][0]).unsqueeze(1)    # [b, 1, h]
         attention_logit = self.score(
-            torch.tanh(src_features + prev_hidden_proj)
+            torch.tanh(src_features + prev_hidden_proj) # [b, L, h]
         )  # [b, L, 1]
         alpha = F.softmax(attention_logit, dim=1)  # [b, L, 1]
         context = torch.bmm(alpha.permute(0, 2, 1), src).squeeze(1)  # [b, c]
@@ -163,7 +162,7 @@ class AttentionDecoder(nn.Module):
         """
         input:
             batch_H : contextual_feature H = hidden state of encoder. [batch_size x num_steps x contextual_feature_channels]
-            text : the text-index of each image. [batch_size x (max_length+1)]. +1 for [GO] token. text[:, 0] = [GO].
+            text : the text-index of each image. [batch_size x (max_length+1)]. +1 for [START] token. text[:, 0] = [START].
         output: probability distribution at each step [batch_size x num_steps x num_classes]
         """
         batch_size = src.size(0)
@@ -191,10 +190,7 @@ class AttentionDecoder(nn.Module):
         if is_train and random.random() < teacher_forcing_ratio:
             for i in range(num_steps):
                 # one-hot vectors for a i-th char. in a batch
-                try:
-                    embedd = self.embedding(text[:, i])
-                except:
-                    import pdb; pdb.set_trace()
+                embedd = self.embedding(text[:, i])
                 # hidden : decoder's hidden s_{t-1}, batch_H : encoder's hidden H, char_onehots : one-hot(y_{t-1})
                 hidden, alpha = self.attention_cell(hidden, src, embedd)
                 if self.num_layers == 1:
@@ -208,7 +204,7 @@ class AttentionDecoder(nn.Module):
         else:
             targets = (
                 torch.LongTensor(batch_size).fill_(self.st_id).to(device)
-            )  # [GO] token
+            )  # [START] token
             probs = (
                 torch.FloatTensor(batch_size, num_steps, self.num_classes)
                 .fill_(0)
@@ -260,7 +256,6 @@ class Attention(nn.Module):
     def forward(self, input, expected, is_train, teacher_forcing_ratio):
         out = self.encoder(input)
         b, c, h, w = out.size()
-        out = out.view(b, c, h * w).transpose(1, 2)  # [b, h* x w* (L), c]
-        output = self.decoder(out, expected, is_train, teacher_forcing_ratio, batch_max_length=expected.size(1))
-        
+        out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
+        output = self.decoder(out, expected, is_train, teacher_forcing_ratio, batch_max_length=expected.size(1))    # [b, sequence length, class size]
         return output

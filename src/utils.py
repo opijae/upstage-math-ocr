@@ -2,7 +2,6 @@ import torch.optim as optim
 
 from networks.Attention import Attention
 from networks.SATRN import SATRN
-from dataset import START, PAD, END
 
 
 def get_network(
